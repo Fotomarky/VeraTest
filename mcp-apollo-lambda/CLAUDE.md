@@ -6,9 +6,8 @@ MCP-powered lead generation and CRM automation. Three servers, one Notion DB, ze
 
 | Server | Status | Tools | Install |
 |--------|--------|-------|---------|
-| **Prospector** | LIVE | find_b2b_leads, find_emails_by_domain, find_email, verify_email | Lambda |
+| **Prospector** | LIVE | find_b2b_leads, find_emails_by_domain, find_email, verify_email, send_email | Lambda |
 | **Notion** | WEEK 1 | create_lead, update_lead, query_pipeline | npx @notionhq/notion-mcp-server |
-| **Gmail** | WEEK 1 | send_email, read_inbox, search_threads | GitHub Awesome MCP Gmail |
 
 ## Infrastructure
 
