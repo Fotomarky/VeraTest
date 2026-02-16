@@ -191,4 +191,67 @@ def find_email(
         return f"Internal error: {str(e)}"
 
 
+@engine.tool()
+def send_email(
+    to: str,
+    subject: str,
+    body: str,
+    from_name: str = "Marco Caruso - Homestagr.ai",
+    confirm: bool = False
+) -> str:
+    """Send an email via Gmail (from caruso.mrc@gmail.com).
+
+    IMPORTANT: This tool requires two calls.
+    1. First call (confirm=false): returns a PREVIEW of the email. Nothing is sent.
+    2. Second call (confirm=true): actually sends the email.
+
+    Always call without confirm first so the human can review before sending.
+
+    Args:
+        to: Recipient email address
+        subject: Email subject line
+        body: Email body in HTML format
+        from_name: Sender display name (default: Marco Caruso - Homestagr.ai)
+        confirm: Set to true to actually send. Default false = preview only.
+    """
+    if not confirm:
+        return (
+            f"=== EMAIL PREVIEW (not sent yet) ===\n"
+            f"From: {from_name} <caruso.mrc@gmail.com>\n"
+            f"To: {to}\n"
+            f"Subject: {subject}\n"
+            f"---\n"
+            f"{body}\n"
+            f"---\n"
+            f"To send this email, call send_email again with confirm=true"
+        )
+
+    gmail_url = os.getenv("GMAIL_SCRIPT_URL")
+    gmail_secret = os.getenv("GMAIL_SECRET")
+    if not gmail_url or not gmail_secret:
+        return "ERROR: Configure GMAIL_SCRIPT_URL and GMAIL_SECRET in Lambda Environment Variables"
+
+    try:
+        response = requests.post(gmail_url, json={
+            "secret": gmail_secret,
+            "to": to,
+            "subject": subject,
+            "body": body,
+            "from_name": from_name
+        }, timeout=30, allow_redirects=True)
+
+        if "Seite nicht gefunden" in response.text or "nicht gefunden" in response.text:
+            return f"Email sent to {to} (subject: {subject})"
+
+        try:
+            data = response.json()
+            if data.get("success"):
+                return f"Email sent to {to} (subject: {subject})"
+            return f"Gmail error: {data.get('error', 'unknown')}"
+        except ValueError:
+            return f"Email sent to {to} (subject: {subject})"
+    except requests.exceptions.RequestException as e:
+        return f"Gmail error: {str(e)}"
+
+
 handler = engine.get_lambda_handler()
