@@ -1,50 +1,125 @@
 # MCP Prospector
 
-MCP server deployed on AWS Lambda for B2B lead prospecting via Apollo.io and Hunter.io.
+MCP-powered lead generation and CRM automation. Three servers, one Notion DB, zero manual data entry.
 
-## Architecture
+## Live Stack
 
-- **Runtime**: Python 3.12 container image on AWS Lambda
-- **Region**: eu-north-1
-- **ECR Repository**: `431118444797.dkr.ecr.eu-north-1.amazonaws.com/mcp-apollo`
-- **Lambda Function URL**: https://j3va2xi6zyn66s6qtrgbvcbjwi0kxkap.lambda-url.eu-north-1.on.aws/
+| Server | Status | Tools | Install |
+|--------|--------|-------|---------|
+| **Prospector** | LIVE | find_b2b_leads, find_emails_by_domain, find_email, verify_email | Lambda |
+| **Notion** | WEEK 1 | create_lead, update_lead, query_pipeline | npx @notionhq/notion-mcp-server |
+| **Gmail** | WEEK 1 | send_email, read_inbox, search_threads | GitHub Awesome MCP Gmail |
+
+## Infrastructure
+
+- **Lambda**: `mcp-apollo` in eu-north-1
 - **MCP Endpoint**: https://j3va2xi6zyn66s6qtrgbvcbjwi0kxkap.lambda-url.eu-north-1.on.aws/mcp/
+- **ECR**: `431118444797.dkr.ecr.eu-north-1.amazonaws.com/mcp-apollo`
+- **Notion Lead DB**: `3074d7f5-0658-817e-b1a1-fdc80291f68d`
 
-## Tools
+## Env Keys (4 total)
 
-### find_b2b_leads (Apollo.io)
-Find qualified B2B leads. Requires Apollo paid API plan.
+```
+APOLLO_API_KEY    # Apollo.io (paid API plan needed)
+HUNTER_API_KEY    # Hunter.io (free: 25 searches/mo)
+NOTION_API_KEY    # ntn_208030285688...
+GMAIL_OAUTH       # Week 1 add-on
+```
 
-- **industry** (required): Sector (e.g. "SaaS", "Fintech", "Marketing")
-- **company_size** (optional, default "11-50"): Size range (11-50, 51-200, 201-500)
-- **location** (optional, default "Switzerland, France"): Location filter
+## Orchestration: Lean Lead Lifecycle
 
-### find_emails_by_domain (Hunter.io)
-Find email addresses associated with a company domain.
+Notion is the single source of truth. Every action updates the DB automatically.
 
-- **domain** (required): Company domain (e.g. "stripe.com")
-- **limit** (optional, default 10): Max results (1-100)
+```
+FIND ──> ENRICH ──> ADD TO NOTION ──> OUTREACH ──> UPDATE ──> CLOSE
+  |         |            |               |            |          |
+Apollo   Hunter.io    Notion API      Gmail       Notion     Manual
+Hunter                Status:New    Thread link   Status:     (Stripe
+                      Pipeline:     auto-saved    Contacted   link)
+                      Lead                        Replied
+                                                  Meeting
+                                                  Won/Lost
+```
 
-### find_email (Hunter.io)
-Find a specific person's email address.
+### Automated Status Transitions
 
-- **domain** (required): Company domain (e.g. "google.com")
-- **first_name** (required): Person's first name
-- **last_name** (required): Person's last name
+```
+Action                          Notion Status    Pipeline Stage
+─────────────────────────────────────────────────────────────────
+Lead found (Hunter/Apollo)   -> New              Lead
+Email verified               -> New              Lead (Email Verified: true)
+Outreach sent (Gmail)        -> Contacted        Lead
+Reply received (Gmail)       -> Replied          Qualified
+Meeting booked               -> Meeting          Negotiation
+Proposal sent                -> Proposal Sent    Proposal Sent
+Deal closed                  -> Won              Closed Won
+No response after 3 touches  -> Cold             Lead (Priority: Cold)
+```
 
-### verify_email (Hunter.io)
-Verify if an email address is valid and deliverable.
+### Week 1 Workflow: Prospector + Notion
 
-- **email** (required): Email address to verify
+Claude prompt: "Find 50 SaaS founders in Geneva, add to Notion"
 
-## Environment Variables
+```
+1. Hunter.io -> find_emails_by_domain for target companies
+2. Hunter.io -> verify_email for each contact
+3. Notion API -> create lead:
+   {
+     Name, Email, Company, Position,
+     Status: "New",
+     Pipeline: "Lead",
+     Source: "Hunter.io",
+     Email Verified: true,
+     Confidence: 83%
+   }
+4. Repeat for next company
+```
 
-Set in Lambda Configuration > Environment Variables:
+Manual step: Email top 10 leads, then update Notion Status -> Contacted.
 
-- `APOLLO_API_KEY`: Apollo.io API key (requires paid API plan for search endpoints)
-- `HUNTER_API_KEY`: Hunter.io API key (free tier: 25 searches/month)
+### Week 1 Add-On: Gmail MCP
 
-## MCP Client Configuration
+Claude prompt: "Send personalized outreach to all Notion leads with Status: New"
+
+```
+1. Notion -> query leads WHERE Status = "New" AND Email Verified = true
+2. For each lead:
+   a. Gmail -> send_email (personalized by Company + Position)
+   b. Notion -> update lead:
+      {
+        Status: "Contacted",
+        Last Contacted: today,
+        Next Follow-up: today + 3 days,
+        Channel: "Email",
+        Gmail Thread: thread_link
+      }
+3. Slack (optional) -> notify #sales: "10 leads contacted"
+```
+
+Claude prompt: "Check for replies and update pipeline"
+
+```
+1. Notion -> query leads WHERE Status = "Contacted"
+2. For each lead:
+   a. Gmail -> search_threads for lead email
+   b. If reply found:
+      Notion -> update: Status: "Replied", Pipeline: "Qualified", Priority: "Hot"
+   c. If no reply + 3 days passed:
+      Gmail -> send follow-up
+      Notion -> update: Next Follow-up: today + 5 days
+   d. If no reply after 3 touches:
+      Notion -> update: Priority: "Cold"
+```
+
+### Week 2: Add Slack + Stripe (only after 5 customers)
+
+```
+Slack  -> auto-notify on status changes
+Stripe -> payment links in proposals
+Xero   -> invoice on close
+```
+
+## MCP Client Config (Target)
 
 ```json
 {
@@ -52,6 +127,16 @@ Set in Lambda Configuration > Environment Variables:
     "prospector": {
       "type": "streamable-http",
       "url": "https://j3va2xi6zyn66s6qtrgbvcbjwi0kxkap.lambda-url.eu-north-1.on.aws/mcp/"
+    },
+    "notion": {
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": { "NOTION_API_KEY": "ntn_..." }
+    },
+    "gmail": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/gmail-mcp-server"],
+      "env": { "GMAIL_OAUTH": "..." }
     }
   }
 }
@@ -70,4 +155,23 @@ docker push 431118444797.dkr.ecr.eu-north-1.amazonaws.com/mcp-apollo:latest
 
 # Update Lambda
 aws lambda update-function-code --function-name mcp-apollo --image-uri 431118444797.dkr.ecr.eu-north-1.amazonaws.com/mcp-apollo:latest --region eu-north-1
+```
+
+## Quick Reference: Claude Prompts
+
+```
+# Prospecting
+"Find emails for all real estate companies in Geneva, verify them, add to Notion"
+
+# Outreach
+"Send personalized cold email to all New leads in Notion, update status"
+
+# Follow-up
+"Check Gmail for replies from Contacted leads, update Notion pipeline"
+
+# Pipeline review
+"Show me all Hot leads in Negotiation stage with deal values"
+
+# Weekly report
+"Count leads by status and pipeline stage, list overdue follow-ups"
 ```
