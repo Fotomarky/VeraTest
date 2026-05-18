@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 const PROFILE_KEY = 'iching_profile_v1';
 
@@ -7,6 +7,7 @@ export interface UserProfile {
   age: number;
 }
 
+/** Profile persisted to localStorage only — no auth or Supabase dependency. */
 export function useProfile() {
   const [profile, setProfile] = useState<UserProfile | null>(() => {
     try {
@@ -17,15 +18,18 @@ export function useProfile() {
     }
   });
 
-  const saveProfile = (data: UserProfile) => {
+  const saveProfile = useCallback((data: UserProfile) => {
+    if (!Number.isFinite(data.age) || data.age < 1 || data.age > 120) {
+      throw new Error(`Invalid age: ${data.age}`);
+    }
     localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
     setProfile(data);
-  };
+  }, []);
 
-  const clearProfile = () => {
+  const clearProfile = useCallback(() => {
     localStorage.removeItem(PROFILE_KEY);
     setProfile(null);
-  };
+  }, []);
 
   return { profile, saveProfile, clearProfile };
 }
