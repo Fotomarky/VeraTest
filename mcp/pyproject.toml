@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simab-mcp"
+version = "0.1.0"
+description = "MCP server for SimAB — UX pretest from Claude Code / Cursor / Claude Desktop"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "mcp>=1.0",
+    "httpx>=0.27",
+    "anyio>=4.0",
+]
+
+[project.scripts]
+simab-mcp = "simab_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["simab_mcp*"]

@@ -1,0 +1,29 @@
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"   # Phoenix UI
+      - "4317:4317"   # OTLP gRPC for spans
+    environment:
+      - PHOENIX_WORKING_DIR=/data
+    volumes:
+      - phoenix_data:/data
+
+  simab:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - SIMAB_DB_PATH=/data/simab.db
+      - SIMAB_UPLOAD_DIR=/data/uploads
+    volumes:
+      - simab_data:/data
+    depends_on:
+      - phoenix
+    command: uvicorn simab.main:app --host 0.0.0.0 --port 8000
+
+volumes:
+  phoenix_data:
+  simab_data:
