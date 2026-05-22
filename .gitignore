@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+.vercel
+.env*.local
+
+# SimAB runtime data
+simab.db
+simab.db-journal
+simab.db-wal
+simab.db-shm
+uploads/
+*.db
+*.db-journal
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Phoenix data (if running locally without Docker)
+phoenix_data/
+
+# Don't commit any landing-page screenshots that aren't fixtures
+# (Comment this out if you want to track your own samples)
+# *.png
+# *.jpg
+# !tests/fixtures/*.png
+
+# Logs
+*.log
