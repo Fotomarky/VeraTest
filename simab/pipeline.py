@@ -10,7 +10,7 @@ import asyncio
 import logging
 
 from . import state
-from .agents import auditor, normalizer, scenarios, simulator, synthesizer
+from .agents import auditor, narrative, normalizer, scenarios, simulator, synthesizer
 from .config import CONFIG
 
 log = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ async def run_pipeline(run_id: str) -> None:
         await _run_simulators(run_id)
         await auditor.run(run_id)
         await synthesizer.run(run_id)
+        await narrative.run(run_id)
         log.info(f"[{run_id}] pipeline complete")
         await _notify_completion(run_id)
     except Exception as e:

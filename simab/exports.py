@@ -146,6 +146,38 @@ def to_markdown(run: Run, share_url: Optional[str] = None) -> str:
     )
     lines.append("")
 
+    # Narrative (v0.3 P2: cohort_narrative agent output)
+    if synth.narrative:
+        lines.append("## Analysis")
+        lines.append("")
+        lines.append(synth.narrative)
+        lines.append("")
+
+    # Structural diff (v0.3 P2: factual differences only, no winner judgment)
+    if synth.structural_diff:
+        lines.append("## What's different between the variants")
+        lines.append("")
+        for d in synth.structural_diff[:10]:
+            lines.append(f"- {d}")
+        lines.append("")
+
+    # Symmetric hypothesis
+    if synth.hypothesis_pros or synth.hypothesis_cons:
+        lines.append("## Tradeoffs (balanced view)")
+        lines.append("")
+        for variant in ("variant_a", "variant_b"):
+            label = variant.replace("_", " ").title()
+            pros = synth.hypothesis_pros.get(variant, [])
+            cons = synth.hypothesis_cons.get(variant, [])
+            if not (pros or cons):
+                continue
+            lines.append(f"**{label}**")
+            for p in pros:
+                lines.append(f"- ✓ {p}")
+            for c in cons:
+                lines.append(f"- ✗ {c}")
+            lines.append("")
+
     # Friction
     if synth.top_friction:
         lines.append("## Top friction (in the losing variant)")
