@@ -18,6 +18,10 @@
 
 ---
 
+> **v0.3 in development on `feat/resonance-redesign`** — the head-to-head simulator is being replaced with single-variant resonance scoring per [`docs/resonance-redesign.md`](docs/resonance-redesign.md). Existing DBs are not migrated and must be wiped before upgrading.
+
+---
+
 ## The problem with A/B testing
 
 Most teams spend $5,000–$50,000 in paid traffic to learn that one of their two landing page variants converts better. By the time the test reaches statistical significance:

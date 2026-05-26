@@ -51,38 +51,60 @@ class Brief(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Resonance — the v0.3 evaluation primitive
+# ---------------------------------------------------------------------------
+
+Cohort = Literal["variant_a", "variant_b"]
+
+ResonanceDim = Literal[
+    "motivation",  # Fogg M — does the page address what this persona wants?
+    "identity",    # does it speak in their vocabulary / world / register?
+    "situation",   # does it acknowledge current context (time, prior experience)?
+    "beliefs",     # does it match priors about category / brand / price?
+    "ability",     # Fogg A — does it remove their specific friction?
+    "trigger",     # Fogg T — is the next step obvious and right-sized?
+]
+
+RESONANCE_DIMS: tuple[str, ...] = (
+    "motivation", "identity", "situation", "beliefs", "ability", "trigger",
+)
+
+# Default weights used to collapse the 6-dim vector into resonance_overall.
+# v0.3 keeps a single set for all personas; per-archetype weights deferred to v0.4.
+RESONANCE_WEIGHTS: dict[str, float] = {
+    "motivation": 0.25,
+    "identity":   0.15,
+    "situation":  0.15,
+    "beliefs":    0.15,
+    "ability":    0.15,
+    "trigger":    0.15,
+}
+
+
+# ---------------------------------------------------------------------------
 # Simulation result — one sim agent's output
 # ---------------------------------------------------------------------------
 
 class SimResult(BaseModel):
     scenario_id: str
-    scenario_segment: str  # denormalized for easy reporting
-    agent_idx: int  # which of the 20 agents (for counterbalancing)
-    presented_order: list[Literal["variant_a", "variant_b"]]
-    verdict: Literal["variant_a", "variant_b", "neither", "needs_more_info"]
-    confidence: Literal["high", "medium", "low"]
-    outcome: Literal["would_convert", "would_bounce", "would_research_more"]
+    scenario_segment: str            # denormalized for easy reporting
+    agent_idx: int                   # which of the N agents (for cohort split)
+    cohort: Cohort                   # which variant this agent evaluated
+    resonance: dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-dimension 1-10 score; keys are ResonanceDim values",
+    )
+    resonance_overall: float = 0.0   # weighted mean of resonance dims, 1.0-10.0
+    intent_signal: Literal["would_act", "would_research", "would_leave"] = "would_research"
+    confidence: Literal["high", "medium", "low"] = "medium"
     friction_points: list[str] = Field(default_factory=list)
     what_worked: list[str] = Field(default_factory=list)
-    rationale: str
-    # Visual evaluation fields (all optional with safe defaults for backward compat)
-    visual_impact: dict[str, float] = Field(default_factory=dict)
-    attention_path: list[str] = Field(default_factory=list)
-    messaging_alignment: Literal["strong", "moderate", "weak"] = "moderate"
+    rationale: str = ""
     first_impression: str = ""
-    # Fogg Behavior Model fields (B = Motivation × Ability × Trigger)
-    fogg_motivation: int = 0       # 1-10: how much this persona WANTS to act
-    fogg_ability: int = 0          # 1-10: how easy the page makes it to act
-    fogg_trigger_clarity: Literal["clear", "ambiguous", "absent"] = "ambiguous"
-    # Trust signal audit
     trust_signals_found: list[str] = Field(default_factory=list)
     trust_signals_missing: list[str] = Field(default_factory=list)
-    # Persuasion framing and cognitive load
-    loss_gain_framing: Literal["gain", "loss", "mixed", "neutral"] = "neutral"
-    metacognitive_reflection: str = ""  # agent's self-correction ("I might be wrong because...")
-    competing_ctas_count: int = 0   # Hick's Law: number of CTAs competing for attention
-    spatial_hierarchy_score: int = 0  # 1-10: Rule of Thirds alignment with persona's priority
-    model: str = "gemini-2.5-flash-lite"
+    metacognitive_reflection: str = ""  # agent's self-correction
+    model: str = "gemini-3-flash-preview"
     latency_ms: int = 0
 
 
@@ -92,14 +114,27 @@ class SimResult(BaseModel):
 
 class AuditReport(BaseModel):
     trust_level: Literal["high", "medium", "low"]
-    order_bias_detected: bool
-    first_position_win_rate: float  # 0-1; expected ~0.5 if no bias
-    confidence_collapse: bool
-    low_confidence_rate: float
-    avg_rationale_coherence: float  # 0-1
+    confidence_collapse: bool = False
+    low_confidence_rate: float = 0.0
+    avg_rationale_coherence: float = 1.0  # 0-1
     segment_divergence: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # Cohort-balance checks replace v0.2 order-bias checks.
+    cohort_balance: dict[str, int] = Field(
+        default_factory=dict,
+        description="{variant_a: 10, variant_b: 10}",
+    )
+    cohort_persona_balance: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="{segment: {variant_a: 3, variant_b: 2}}",
+    )
+    per_dim_variance: dict[str, float] = Field(
+        default_factory=dict,
+        description="Variance of resonance scores per dim across all agents — "
+                    "low variance signals the LLM collapsed to a default answer.",
+    )
+    inflation_warning: bool = False  # set when overall resonance > 8.5 across both cohorts
     warnings: list[str] = Field(default_factory=list)
-    recommended_action: str
+    recommended_action: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -114,20 +149,30 @@ class FrictionTheme(BaseModel):
 
 
 class Synthesis(BaseModel):
-    winner: Literal["variant_a", "variant_b", "neither"]
-    raw_vote: dict[str, int]
-    weighted_vote: dict[str, float]
-    coverage_score: int = Field(..., ge=0, le=100)
+    # ── Cohort-resonance verdict (v0.3) ──────────────────────────────────────
+    cohort_resonance: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="{variant_a: {motivation: 6.2, ...}, variant_b: {...}}",
+    )
+    cohort_resonance_overall: dict[str, float] = Field(
+        default_factory=dict,
+        description="{variant_a: 5.8, variant_b: 7.2} — weighted mean per cohort",
+    )
+    resonance_gap: float = 0.0                   # cohort_b_overall - cohort_a_overall
+    directional_winner: Literal["variant_a", "variant_b", "tie"] = "tie"
+    gap_significance: Literal["strong", "moderate", "weak", "tie"] = "tie"
+    per_persona_resonance: dict[str, dict[str, dict[str, float]]] = Field(
+        default_factory=dict,
+        description="{segment: {variant_a: {dim: score}, variant_b: {dim: score}}}",
+    )
+    # ── Narrative + diagnostics (kept) ────────────────────────────────────────
+    coverage_score: int = Field(default=0, ge=0, le=100)
     top_friction: list[FrictionTheme] = Field(default_factory=list)
     what_worked_themes: list[FrictionTheme] = Field(default_factory=list)
     segment_splits: dict[str, dict[str, float]] = Field(default_factory=dict)
-    recommendation: str
-    one_line_summary: str
-    visual_impact: dict[str, float] = Field(default_factory=dict)
+    recommendation: str = ""
+    one_line_summary: str = ""
     confound_warning: Optional[str] = None
-    # Fogg aggregate: {"variant_a": {"motivation": 6.2, "ability": 4.1}, "variant_b": {...}}
-    fogg_avg: dict[str, dict[str, float]] = Field(default_factory=dict)
-    # Trust signals that most agents reported missing — actionable recommendations
     trust_signal_gaps: list[str] = Field(default_factory=list)
 
 

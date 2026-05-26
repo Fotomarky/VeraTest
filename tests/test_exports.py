@@ -32,23 +32,46 @@ async def _build_complete_run(run_id_out: list[str]) -> str:
     )
     await state.write_brief(run_id, brief)
 
-    # Audit with low trust to exercise the warning paths
+    # Audit with medium trust + a translatable warning to exercise the PM path
     audit = AuditReport(
         trust_level="medium",
-        order_bias_detected=False,
-        first_position_win_rate=0.55,
         confidence_collapse=False,
         low_confidence_rate=0.2,
         avg_rationale_coherence=0.78,
-        warnings=["Position bias detected: 70% favored the first-shown image"],
-        recommended_action="Results are directional. Validate before bigger bets.",
+        cohort_balance={"variant_a": 10, "variant_b": 10},
+        cohort_persona_balance={
+            "SaaS evaluator": {"variant_a": 6, "variant_b": 6},
+            "Mobile browser": {"variant_a": 4, "variant_b": 4},
+        },
+        per_dim_variance={
+            "motivation": 1.4, "identity": 1.1, "situation": 1.5,
+            "beliefs": 1.2, "ability": 1.6, "trigger": 1.3,
+        },
+        inflation_warning=True,
+        warnings=["Resonance inflation: both cohorts averaged above 8.5/10."],
+        recommended_action="Results are directional. Validate before scaling traffic.",
     )
     await state.write_audit(run_id, audit)
 
     synthesis = Synthesis(
-        winner="variant_b",
-        raw_vote={"variant_a": 6, "variant_b": 14},
-        weighted_vote={"variant_a": 0.32, "variant_b": 0.68},
+        cohort_resonance={
+            "variant_a": {"motivation": 5, "identity": 5, "situation": 4,
+                          "beliefs": 5, "ability": 6, "trigger": 5},
+            "variant_b": {"motivation": 7, "identity": 7, "situation": 7,
+                          "beliefs": 7, "ability": 8, "trigger": 7},
+        },
+        cohort_resonance_overall={"variant_a": 5.0, "variant_b": 7.15},
+        resonance_gap=2.15,
+        directional_winner="variant_b",
+        gap_significance="strong",
+        per_persona_resonance={
+            "SaaS evaluator": {
+                "variant_a": {"motivation": 5, "identity": 5, "situation": 4,
+                              "beliefs": 5, "ability": 6, "trigger": 5},
+                "variant_b": {"motivation": 8, "identity": 7, "situation": 7,
+                              "beliefs": 7, "ability": 8, "trigger": 8},
+            },
+        },
         coverage_score=82,
         top_friction=[
             FrictionTheme(
@@ -65,12 +88,13 @@ async def _build_complete_run(run_id_out: list[str]) -> str:
             ),
         ],
         segment_splits={
-            "SaaS evaluator": {"variant_a": 0.25, "variant_b": 0.75},
-            "Mobile browser": {"variant_a": 0.45, "variant_b": 0.55},
+            "SaaS evaluator": {"variant_a": 5.2, "variant_b": 7.4},
+            "Mobile browser": {"variant_a": 4.6, "variant_b": 6.9},
         },
         recommendation="Ship Variant B but fix the pricing tier ambiguity before scaling traffic.",
-        one_line_summary="Variant B wins clearly with desktop evaluators; "
-                         "mobile audience is more split.",
+        one_line_summary="Variant B resonates clearly more strongly with desktop "
+                         "evaluators; mobile audience shows a smaller gap.",
+        trust_signal_gaps=["Testimonials", "Money-back guarantee"],
     )
     await state.write_synthesis(run_id, synthesis)
 
@@ -87,9 +111,14 @@ async def test_pm_summary_translates_warnings():
     assert pm["ready"] is True
     assert pm["confidence"] == "medium"
     assert "Variant B" in pm["headline"]
-    # Technical phrase should be translated
-    assert "skewed by which design users saw first" in pm["caveats"][0]
-    assert "Position bias detected" not in pm["caveats"][0]
+    # Technical phrase should be translated to PM-friendly language
+    assert any("trust the gap between designs" in c for c in pm["caveats"])
+    assert all("Resonance inflation" not in c for c in pm["caveats"])
+    # New v0.3 resonance_scores block must be present
+    assert pm["resonance_scores"]["variant_a"] == "5.0/10"
+    assert pm["resonance_scores"]["variant_b"] == "7.2/10"
+    assert pm["resonance_scores"]["gap"] == "+2.1"  # 2.15 rounds down via banker's rounding
+    assert pm["resonance_scores"]["significance"] == "strong"
 
 
 @pytest.mark.asyncio
@@ -112,11 +141,14 @@ async def test_markdown_export_contains_key_sections():
 
     md = exports.to_markdown(run, share_url="https://example.com/share/x")
 
-    # Must contain the headline decision
-    assert "Variant B is the better choice" in md
+    # Must contain the new headline phrasing
+    assert "Variant B resonates" in md
+    # Must contain the resonance score table
+    assert "7.2/10" in md
+    assert "directional winner" in md
     # Must contain the friction theme
     assert "Pricing tier is unclear" in md
-    # Must contain segment splits
+    # Must contain per-segment resonance
     assert "SaaS evaluator" in md
     # Must contain the recommendation
     assert "fix the pricing tier" in md
