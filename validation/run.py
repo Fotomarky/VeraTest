@@ -124,12 +124,12 @@ async def baseline_simab(case: TestCase) -> str:
     run = await state.get_run(run_id)
     if run is None or run.synthesis is None:
         return "?"
-    winner = run.synthesis.winner  # "variant_a" | "variant_b" | "neither"
+    winner = run.synthesis.directional_winner  # "variant_a" | "variant_b" | "tie"
     if winner == "variant_a":
         return "A"
     elif winner == "variant_b":
         return "B"
-    return "?"
+    return "?"  # tie = abstain
 
 
 # ---------------------------------------------------------------------------

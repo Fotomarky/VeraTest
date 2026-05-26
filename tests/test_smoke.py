@@ -73,10 +73,11 @@ async def test_sim_result_idempotent_mutex():
         scenario_id="sc_001",
         scenario_segment="test",
         agent_idx=0,
-        presented_order=["variant_a", "variant_b"],
-        verdict="variant_b",
+        cohort="variant_a",
+        resonance={"motivation": 7, "identity": 6, "situation": 5, "beliefs": 6, "ability": 7, "trigger": 6},
+        resonance_overall=6.3,
+        intent_signal="would_research",
         confidence="high",
-        outcome="would_convert",
         rationale="ok",
     )
     written1 = await state.append_sim_result(run_id, result)
@@ -95,11 +96,13 @@ async def test_different_agent_idx_both_succeed():
         variant_a_path="/a", variant_b_path="/b",
     )
     r1 = SimResult(scenario_id="sc_001", scenario_segment="t", agent_idx=0,
-                   presented_order=["variant_a","variant_b"], verdict="variant_a",
-                   confidence="high", outcome="would_convert", rationale="")
+                   cohort="variant_a", resonance={"motivation":6,"identity":6,"situation":6,"beliefs":6,"ability":6,"trigger":6},
+                   resonance_overall=6.0, intent_signal="would_research",
+                   confidence="high", rationale="")
     r2 = SimResult(scenario_id="sc_001", scenario_segment="t", agent_idx=1,
-                   presented_order=["variant_b","variant_a"], verdict="variant_b",
-                   confidence="high", outcome="would_convert", rationale="")
+                   cohort="variant_b", resonance={"motivation":7,"identity":7,"situation":7,"beliefs":7,"ability":7,"trigger":7},
+                   resonance_overall=7.0, intent_signal="would_act",
+                   confidence="high", rationale="")
     assert await state.append_sim_result(run_id, r1) is True
     assert await state.append_sim_result(run_id, r2) is True
     assert await state.count_sim_results(run_id) == 2
