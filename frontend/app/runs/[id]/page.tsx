@@ -76,21 +76,75 @@ const PHASE_LABELS: Record<string, string> = {
   failed: "Failed",
 };
 
+// Ordered phase sequence for the progress indicator. Excludes terminal states.
+const PHASE_ORDER = [
+  "pending",
+  "normalizing",
+  "building_scenarios",
+  "simulating",
+  "auditing",
+  "synthesizing",
+] as const;
+
+const PHASE_SHORT: Record<string, string> = {
+  pending: "Queued",
+  normalizing: "Brief",
+  building_scenarios: "Scenarios",
+  simulating: "Simulate",
+  auditing: "Audit",
+  synthesizing: "Synthesise",
+};
+
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m ${s.toString().padStart(2, "0")}s` : `${s}s`;
+}
+
 export default function RunPage({ params }: { params: { id: string } }) {
   const [run, setRun] = useState<Run | null>(null);
   const [copied, setCopied] = useState(false);
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
+    // Fire an immediate fetch so the page shows real data on first paint,
+    // independent of how long it takes the SSE to deliver its first event.
+    let cancelled = false;
+    fetch(`/api/runs/${params.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setRun(data);
+      })
+      .catch(() => {});
+
     const source = new EventSource(`/api/runs/${params.id}/stream`);
     source.addEventListener("update", (e: MessageEvent) => {
-      try { setRun(JSON.parse(e.data)); } catch {}
+      try {
+        setRun(JSON.parse(e.data));
+      } catch {}
     });
     source.onerror = () => {
       fetch(`/api/runs/${params.id}`).then((r) => r.json()).then(setRun).catch(() => {});
       source.close();
     };
-    return () => source.close();
+    return () => {
+      cancelled = true;
+      source.close();
+    };
   }, [params.id]);
+
+  // Tick once a second while the run is in progress so the elapsed counter updates.
+  useEffect(() => {
+    if (!run) {
+      const i = setInterval(() => setNow(Date.now()), 1000);
+      return () => clearInterval(i);
+    }
+    if (run.status === "complete" || run.status === "failed") return;
+    const i = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(i);
+  }, [run]);
 
   async function copyMarkdown() {
     try {
@@ -105,9 +159,16 @@ export default function RunPage({ params }: { params: { id: string } }) {
   if (!run) {
     return (
       <div className="space-y-4 max-w-4xl">
-        <div className="h-7 bg-neutral-200 rounded animate-pulse w-1/2" />
-        <div className="h-4 bg-neutral-100 rounded animate-pulse w-1/3" />
-        <div className="h-20 bg-neutral-100 rounded animate-pulse" />
+        <div>
+          <h1 className="text-2xl font-semibold">Connecting…</h1>
+          <div className="text-xs font-mono text-neutral-400 mt-1">{params.id}</div>
+        </div>
+        <ProgressBlock
+          status="pending"
+          completed={0}
+          total={20}
+          elapsedMs={now - mountedAt}
+        />
       </div>
     );
   }
@@ -172,20 +233,12 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
       {/* In-progress status */}
       {inProgress && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="flex items-center justify-between text-sm gap-3 flex-wrap">
-            <span className="font-medium">{PHASE_LABELS[run.status] || run.status}</span>
-            {run.status === "simulating" && (
-              <span className="text-neutral-600 text-xs">{completed} / {total} agents</span>
-            )}
-          </div>
-          <div className="mt-2 h-1.5 bg-neutral-200 rounded-full overflow-hidden">
-            <div
-              className={`h-full bg-amber-500 transition-all ${run.status !== "simulating" ? "animate-pulse" : ""}`}
-              style={{ width: run.status === "simulating" ? `${Math.min(100, (completed / total) * 100)}%` : "100%" }}
-            />
-          </div>
-        </div>
+        <ProgressBlock
+          status={run.status}
+          completed={completed}
+          total={total}
+          elapsedMs={now - mountedAt}
+        />
       )}
 
       {/* Error */}
@@ -406,6 +459,88 @@ export default function RunPage({ params }: { params: { id: string } }) {
           </details>
         </section>
       )}
+    </div>
+  );
+}
+
+function ProgressBlock({
+  status,
+  completed,
+  total,
+  elapsedMs,
+}: {
+  status: string;
+  completed: number;
+  total: number;
+  elapsedMs: number;
+}) {
+  const currentIdx = PHASE_ORDER.indexOf(status as (typeof PHASE_ORDER)[number]);
+  const phaseLabel = PHASE_LABELS[status] || status;
+  const isSimulating = status === "simulating";
+  const phaseNum = currentIdx >= 0 ? currentIdx + 1 : 0;
+  const phaseTotal = PHASE_ORDER.length;
+  const overallPct = (() => {
+    if (currentIdx < 0) return 5;
+    if (isSimulating && total > 0) {
+      // Per-agent granularity inside the simulating phase
+      const base = (PHASE_ORDER.indexOf("simulating") / phaseTotal) * 100;
+      const slice = (1 / phaseTotal) * 100;
+      return base + slice * Math.min(1, completed / total);
+    }
+    return ((currentIdx + 0.5) / phaseTotal) * 100;
+  })();
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
+      {/* Top line: phase label + elapsed */}
+      <div className="flex items-center justify-between text-sm gap-3 flex-wrap">
+        <span className="font-medium">{phaseLabel}</span>
+        <span className="text-neutral-600 text-xs flex items-center gap-3">
+          {phaseNum > 0 && (
+            <span>
+              Phase <span className="font-mono">{phaseNum}/{phaseTotal}</span>
+            </span>
+          )}
+          {isSimulating && (
+            <span className="font-mono">
+              {completed} / {total} agents
+            </span>
+          )}
+          <span className="font-mono text-neutral-500">{formatElapsed(elapsedMs)}</span>
+        </span>
+      </div>
+
+      {/* Continuous progress bar */}
+      <div className="h-1.5 bg-neutral-200 rounded-full overflow-hidden">
+        <div
+          className={`h-full bg-amber-500 transition-all ${isSimulating ? "" : "animate-pulse"}`}
+          style={{ width: `${overallPct}%` }}
+        />
+      </div>
+
+      {/* Phase chips — current = solid, past = checked, future = ghost */}
+      <div className="flex flex-wrap gap-1.5">
+        {PHASE_ORDER.map((p, i) => {
+          const isPast = i < currentIdx;
+          const isCurrent = i === currentIdx;
+          return (
+            <span
+              key={p}
+              className={[
+                "text-[11px] px-2 py-0.5 rounded-full border font-medium",
+                isCurrent && "bg-amber-500 text-white border-amber-500",
+                isPast && "bg-neutral-200 text-neutral-600 border-neutral-200",
+                !isCurrent && !isPast && "bg-white text-neutral-400 border-neutral-200",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              {isPast ? "✓ " : ""}
+              {PHASE_SHORT[p] || p}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }
