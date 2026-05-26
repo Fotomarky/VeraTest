@@ -28,7 +28,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import exports, state
 from .config import CONFIG
-from .models import CreateRunResponse
+from .models import AudiencePreset, CreateRunResponse
 from .pipeline import run_pipeline
 
 logging.basicConfig(
@@ -77,6 +77,7 @@ async def create_run(
     variant_b: UploadFile,
     goal: str = Form(...),
     audience: str = Form(""),
+    audience_preset: str = Form(""),
     persona_source: str = Form("paste"),
 ) -> CreateRunResponse:
     """Create a run and kick off the pipeline in the background."""
@@ -92,9 +93,22 @@ async def create_run(
     a_path.write_bytes(await variant_a.read())
     b_path.write_bytes(await variant_b.read())
 
+    # Parse audience_preset JSON if provided. Empty string means "no preset".
+    preset_obj: AudiencePreset | None = None
+    if audience_preset:
+        try:
+            preset_obj = AudiencePreset.model_validate_json(audience_preset)
+            if preset_obj.is_empty():
+                preset_obj = None
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid audience_preset JSON: {e}")
+    if preset_obj is not None and persona_source == "paste":
+        persona_source = "preset"
+
     run_id = await state.create_run(
         goal=goal,
         audience_raw=audience,
+        audience_preset=preset_obj,
         persona_source=persona_source,
         variant_a_path=str(a_path),
         variant_b_path=str(b_path),

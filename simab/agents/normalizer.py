@@ -11,9 +11,36 @@ from pathlib import Path
 
 from .. import state
 from ..llm import MODEL_FLASH, generate
-from ..models import Brief, ScenarioCard
+from ..models import AudiencePreset, Brief, ScenarioCard
 
 log = logging.getLogger(__name__)
+
+
+def _format_audience_block(preset: AudiencePreset | None, raw: str) -> str:
+    """Pick the best representation of audience input for the LLM.
+
+    Priority: structured preset (if non-empty) > free-text raw > "(empty)".
+    Structured presets are formatted as a labeled block so the LLM treats
+    them as constraints rather than free-text hints.
+    """
+    if preset is not None and not preset.is_empty():
+        lines = ["STRUCTURED AUDIENCE PRESET (use these as constraints):"]
+        if preset.age_ranges:
+            lines.append(f"  - Age ranges:  {', '.join(preset.age_ranges)}")
+        if preset.roles:
+            lines.append(f"  - Roles:       {', '.join(preset.roles)}")
+        if preset.industries:
+            lines.append(f"  - Industries:  {', '.join(preset.industries)}")
+        if preset.interests:
+            lines.append(f"  - Interests:   {', '.join(preset.interests)}")
+        if preset.behaviors:
+            lines.append(f"  - Behaviors:   {', '.join(preset.behaviors)}")
+        if preset.devices:
+            lines.append(f"  - Devices:     {', '.join(preset.devices)}")
+        if preset.notes:
+            lines.append(f"  - Notes:       {preset.notes}")
+        return "\n".join(lines)
+    return raw or "(empty)"
 
 
 PROMPT = """\
@@ -21,9 +48,9 @@ You are a UX research assistant analyzing a landing page A/B test.
 
 CONVERSION GOAL: {goal}
 
-AUDIENCE INPUT (could be JSON, CSV, free text, campaign brief, or empty):
+AUDIENCE INPUT:
 ---
-{audience_raw}
+{audience_block}
 ---
 
 You will receive two landing page images: VARIANT A first, then VARIANT B.
@@ -36,7 +63,11 @@ Your task: produce a structured brief. Extract or infer:
 2. key_differences — 3-5 observable differences between A and B.
 
 3. inferred_personas — array of 3-7 persona objects. Rules:
-   - If audience input contains structured persona data, preserve and normalize it.
+   - If audience input is a STRUCTURED AUDIENCE PRESET (chip selections),
+     treat each persona as a coherent intersection of those selections. Honor
+     the selected age_ranges, roles, industries, interests, behaviors, and
+     devices as constraints — do NOT invent personas that contradict them.
+   - If audience input contains structured persona data, preserve and normalize.
    - If audience input is free text or a brief, extract the segments.
    - If audience input is empty, derive 5 plausible personas from what
      the page visuals suggest about the target audience.
@@ -123,7 +154,8 @@ async def run(run_id: str) -> Brief:
     img_a = Path(run.variant_a_path).read_bytes()
     img_b = Path(run.variant_b_path).read_bytes()
 
-    prompt = PROMPT.format(goal=run.goal, audience_raw=run.audience_raw or "(empty)")
+    audience_block = _format_audience_block(run.audience_preset, run.audience_raw)
+    prompt = PROMPT.format(goal=run.goal, audience_block=audience_block)
 
     raw = await generate(
         model=MODEL_FLASH,

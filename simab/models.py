@@ -36,6 +36,31 @@ class ScenarioCard(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# AudiencePreset — structured chip input from the v0.3 /new page
+# ---------------------------------------------------------------------------
+
+class AudiencePreset(BaseModel):
+    """Structured audience input from the chip selector UX.
+
+    All fields are optional multi-select arrays. When empty, the normalizer
+    falls back to either audience_raw text or pure visual inference.
+    """
+    age_ranges: list[str] = Field(default_factory=list)
+    roles:      list[str] = Field(default_factory=list)
+    industries: list[str] = Field(default_factory=list)
+    interests:  list[str] = Field(default_factory=list)
+    behaviors:  list[str] = Field(default_factory=list)
+    devices:    list[str] = Field(default_factory=list)
+    notes: str = ""
+
+    def is_empty(self) -> bool:
+        return not any([
+            self.age_ranges, self.roles, self.industries,
+            self.interests, self.behaviors, self.devices, self.notes,
+        ])
+
+
+# ---------------------------------------------------------------------------
 # Brief — output of the BriefNormalizer agent
 # ---------------------------------------------------------------------------
 
@@ -202,8 +227,9 @@ class Run(BaseModel):
 
     # Inputs (set at creation)
     goal: str
-    audience_raw: str = ""  # paste mode input
-    persona_source: Literal["paste", "ga4", "auto", "library"] = "paste"
+    audience_raw: str = ""  # legacy free-text path
+    audience_preset: Optional[AudiencePreset] = None  # v0.3 chip selector input
+    persona_source: Literal["paste", "ga4", "auto", "library", "preset"] = "paste"
     variant_a_path: str
     variant_b_path: str
 

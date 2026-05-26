@@ -1,6 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import {
+  AudiencePreset,
+  PRESET_GROUPS,
+  PresetGroup,
+  PresetKey,
+  emptyPreset,
+  isEmptyPreset,
+  loadLastPreset,
+  randomSensibleDefault,
+  saveLastPreset,
+} from "@/lib/audiencePresets";
 
 const GOAL_EXAMPLES = [
   "sign up for free trial",
@@ -10,23 +21,6 @@ const GOAL_EXAMPLES = [
   "download the app",
 ];
 
-const AUDIENCE_TEMPLATES: Record<string, string> = {
-  "B2B SaaS evaluators":
-    "Startup founders and engineering leads evaluating CI/dev tools. " +
-    "Mostly on desktop, mix of free-trial-seekers and paid evaluators. " +
-    "Care about pricing transparency, integrations, and time-to-value.",
-  "E-commerce shoppers":
-    "Mobile shoppers in the 25-44 age range, mostly returning visitors " +
-    "from email and paid social. High price sensitivity, short attention span, " +
-    "drop off quickly if shipping isn't clear.",
-  "Consumer SaaS / freemium":
-    "Mix of new visitors from organic and paid search. " +
-    "Most are mobile, 18-34 age range, comparing 2-3 alternatives. " +
-    "Will sign up for free but bounce on hidden costs.",
-  "Empty / let SimAB infer":
-    "",
-};
-
 export default function NewRunPage() {
   const router = useRouter();
   const [variantA, setVariantA] = useState<File | null>(null);
@@ -34,9 +28,38 @@ export default function NewRunPage() {
   const [previewA, setPreviewA] = useState<string | null>(null);
   const [previewB, setPreviewB] = useState<string | null>(null);
   const [goal, setGoal] = useState("");
-  const [audience, setAudience] = useState("");
+  const [preset, setPreset] = useState<AudiencePreset>(emptyPreset());
+  const [hasLastPreset, setHasLastPreset] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Detect "last audience" availability after mount (localStorage is client-only)
+  useEffect(() => {
+    setHasLastPreset(loadLastPreset() !== null);
+  }, []);
+
+  function toggleChip(key: PresetKey, option: string) {
+    setPreset((cur) => {
+      const arr = cur[key];
+      const next = arr.includes(option)
+        ? arr.filter((x) => x !== option)
+        : [...arr, option];
+      return { ...cur, [key]: next };
+    });
+  }
+
+  function clearPreset() {
+    setPreset(emptyPreset());
+  }
+
+  function applyRandomDefault() {
+    setPreset(randomSensibleDefault());
+  }
+
+  function applyLastPreset() {
+    const last = loadLastPreset();
+    if (last) setPreset(last);
+  }
 
   function handleFile(which: "a" | "b", file: File | null) {
     if (which === "a") {
@@ -64,7 +87,10 @@ export default function NewRunPage() {
     form.append("variant_a", variantA);
     form.append("variant_b", variantB);
     form.append("goal", goal);
-    form.append("audience", audience);
+    if (!isEmptyPreset(preset)) {
+      form.append("audience_preset", JSON.stringify(preset));
+      saveLastPreset(preset);
+    }
     try {
       const res = await fetch("/api/runs", { method: "POST", body: form });
       if (!res.ok) {
@@ -80,32 +106,47 @@ export default function NewRunPage() {
   }
 
   const canSubmit = variantA && variantB && goal.trim() && !submitting;
+  const selectedCount =
+    preset.age_ranges.length +
+    preset.roles.length +
+    preset.industries.length +
+    preset.interests.length +
+    preset.behaviors.length +
+    preset.devices.length;
 
   return (
     <form onSubmit={submit} className="space-y-6 max-w-3xl">
       <div>
         <h1 className="text-2xl font-semibold mb-1">New pretest</h1>
         <p className="text-sm text-neutral-600">
-          Upload two variants, describe the goal, and optionally describe your
-          audience. Typical run: <strong>60–120 seconds</strong>.
+          Upload two variants, describe the goal, pick the audience.
+          Typical run: <strong>60–120 seconds</strong>.
         </p>
       </div>
 
-      {/* Variants section */}
+      {/* Variants */}
       <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-4">
         <h2 className="font-medium">Variants</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FileSlot label="Variant A" file={variantA} preview={previewA}
-                    onChange={(f) => handleFile("a", f)} />
-          <FileSlot label="Variant B" file={variantB} preview={previewB}
-                    onChange={(f) => handleFile("b", f)} />
+          <FileSlot
+            label="Variant A"
+            file={variantA}
+            preview={previewA}
+            onChange={(f) => handleFile("a", f)}
+          />
+          <FileSlot
+            label="Variant B"
+            file={variantB}
+            preview={previewB}
+            onChange={(f) => handleFile("b", f)}
+          />
         </div>
         <p className="text-xs text-neutral-500">
           PNG or JPG. Aim for 1200×800 or larger so the agents can read fine detail.
         </p>
       </section>
 
-      {/* Goal section */}
+      {/* Goal */}
       <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-3">
         <h2 className="font-medium">Conversion goal</h2>
         <input
@@ -119,7 +160,9 @@ export default function NewRunPage() {
           <span className="text-xs text-neutral-500 mr-1 self-center">Examples:</span>
           {GOAL_EXAMPLES.map((g) => (
             <button
-              key={g} type="button" onClick={() => setGoal(g)}
+              key={g}
+              type="button"
+              onClick={() => setGoal(g)}
               className="text-xs px-2 py-1 rounded-full border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 transition"
             >
               {g}
@@ -128,35 +171,70 @@ export default function NewRunPage() {
         </div>
       </section>
 
-      {/* Audience section */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-3">
+      {/* Audience — chip selector */}
+      <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-4">
         <div className="flex items-baseline justify-between flex-wrap gap-2">
           <h2 className="font-medium">Audience</h2>
           <span className="text-xs text-neutral-500">
-            optional — leave empty to infer from variants
+            {selectedCount === 0
+              ? "optional — leave empty to infer from variants"
+              : `${selectedCount} chip${selectedCount === 1 ? "" : "s"} selected`}
           </span>
         </div>
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          <span className="text-xs text-neutral-500 mr-1 self-center">Quick start:</span>
-          {Object.keys(AUDIENCE_TEMPLATES).map((label) => (
+
+        {/* Quick actions */}
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={applyRandomDefault}
+            className="text-xs px-2 py-1 rounded-full bg-neutral-900 text-white hover:bg-neutral-700 transition"
+          >
+            Random sensible default
+          </button>
+          {hasLastPreset && (
             <button
-              key={label} type="button"
-              onClick={() => setAudience(AUDIENCE_TEMPLATES[label])}
-              className="text-xs px-2 py-1 rounded-full border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 transition"
+              type="button"
+              onClick={applyLastPreset}
+              className="text-xs px-2 py-1 rounded-full border border-neutral-300 text-neutral-700 hover:border-neutral-500 transition"
             >
-              {label}
+              Use my last audience
             </button>
+          )}
+          {selectedCount > 0 && (
+            <button
+              type="button"
+              onClick={clearPreset}
+              className="text-xs px-2 py-1 rounded-full text-neutral-500 hover:text-neutral-900 transition"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+
+        {/* Chip groups */}
+        <div className="space-y-3">
+          {PRESET_GROUPS.map((group) => (
+            <ChipGroup
+              key={group.key}
+              group={group}
+              selected={preset[group.key]}
+              onToggle={(opt) => toggleChip(group.key, opt)}
+            />
           ))}
         </div>
-        <textarea
-          value={audience}
-          onChange={(e) => setAudience(e.target.value)}
-          rows={5}
-          placeholder="Paste a campaign brief, JSON personas, CSV cohort data, or describe in plain text. SimAB will detect the format and extract personas automatically."
-          className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
-        />
-        <div className="text-xs text-neutral-500 leading-relaxed">
-          v0.2 will add a GA4 connector — see <code className="text-neutral-700">integrations/ga4.py</code> for the backend.
+
+        {/* Optional notes field */}
+        <div>
+          <label className="text-sm font-medium text-neutral-700 block mb-1">
+            Notes <span className="text-xs text-neutral-500">(optional)</span>
+          </label>
+          <textarea
+            value={preset.notes || ""}
+            onChange={(e) => setPreset({ ...preset, notes: e.target.value })}
+            rows={2}
+            placeholder="Anything the chips don't cover — specific JTBD, constraints, prior context."
+            className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+          />
         </div>
       </section>
 
@@ -168,7 +246,8 @@ export default function NewRunPage() {
 
       <div className="flex items-center gap-4">
         <button
-          type="submit" disabled={!canSubmit}
+          type="submit"
+          disabled={!canSubmit}
           className="px-5 py-2.5 rounded-md bg-neutral-900 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-neutral-700 transition"
         >
           {submitting ? "Starting…" : "Run pretest"}
@@ -181,8 +260,74 @@ export default function NewRunPage() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Components
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ChipGroup({
+  group,
+  selected,
+  onToggle,
+}: {
+  group: PresetGroup;
+  selected: string[];
+  onToggle: (option: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const inlineCount = group.inlineCount ?? 8;
+  const visible = expanded ? group.options : group.options.slice(0, inlineCount);
+  const hidden = group.options.length - visible.length;
+
+  return (
+    <div>
+      <div className="text-xs font-medium text-neutral-600 mb-1">{group.label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {visible.map((opt) => {
+          const isSel = selected.includes(opt);
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => onToggle(opt)}
+              className={[
+                "text-xs px-2.5 py-1 rounded-full border transition",
+                isSel
+                  ? "bg-neutral-900 text-white border-neutral-900"
+                  : "border-neutral-300 text-neutral-700 hover:border-neutral-500 hover:text-neutral-900",
+              ].join(" ")}
+            >
+              {opt}
+            </button>
+          );
+        })}
+        {hidden > 0 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="text-xs px-2 py-1 rounded-full text-neutral-500 hover:text-neutral-900 transition"
+          >
+            + {hidden} more
+          </button>
+        )}
+        {expanded && group.options.length > inlineCount && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="text-xs px-2 py-1 rounded-full text-neutral-500 hover:text-neutral-900 transition"
+          >
+            show less
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FileSlot({
-  label, file, preview, onChange,
+  label,
+  file,
+  preview,
+  onChange,
 }: {
   label: string;
   file: File | null;
@@ -194,21 +339,32 @@ function FileSlot({
       <span className="text-sm font-medium block mb-1">{label}</span>
       {preview ? (
         <div className="relative group">
-          <img src={preview} alt={label}
-               className="w-full h-48 object-contain bg-neutral-50 rounded border border-neutral-200" />
+          <img
+            src={preview}
+            alt={label}
+            className="w-full h-48 object-contain bg-neutral-50 rounded border border-neutral-200"
+          />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition rounded flex items-center justify-center">
             <label className="opacity-0 group-hover:opacity-100 transition cursor-pointer bg-white px-3 py-1.5 rounded-md text-xs font-medium shadow">
               Replace
-              <input type="file" accept="image/*" className="hidden"
-                     onChange={(e) => onChange(e.target.files?.[0] || null)} />
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => onChange(e.target.files?.[0] || null)}
+              />
             </label>
           </div>
           <div className="text-xs text-neutral-500 mt-1 truncate">{file?.name}</div>
         </div>
       ) : (
         <label className="block rounded border-2 border-dashed border-neutral-300 h-48 flex items-center justify-center cursor-pointer hover:border-neutral-500 hover:bg-neutral-50 transition">
-          <input type="file" accept="image/*" className="hidden"
-                 onChange={(e) => onChange(e.target.files?.[0] || null)} />
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onChange(e.target.files?.[0] || null)}
+          />
           <div className="text-center px-4">
             <div className="text-sm text-neutral-700 mb-1">Click to upload</div>
             <div className="text-xs text-neutral-500">PNG or JPG, any size</div>
