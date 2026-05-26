@@ -34,6 +34,11 @@ Respond with ONLY: {{"scores": [0.9, 0.7, ...]}}
 
 INFLATION_THRESHOLD = 8.5
 LOW_VARIANCE_THRESHOLD = 0.5
+# Mid-range guard for collapse detection. Low variance is only suspicious when
+# the mean sits in the indeterminate middle. Uniformly low or uniformly high
+# scores across personas are real cross-persona signal, not model collapse.
+COLLAPSE_MIDRANGE_LOW = 4.0
+COLLAPSE_MIDRANGE_HIGH = 7.0
 COHORT_IMBALANCE_TOLERANCE = 0.2  # |cohort_a - cohort_b| / total agents
 
 
@@ -51,18 +56,28 @@ def _cohort_persona_balance(results: list[SimResult]) -> dict[str, dict[str, int
     return {k: dict(v) for k, v in out.items()}
 
 
-def _per_dim_variance(results: list[SimResult]) -> dict[str, float]:
-    """Population variance of resonance scores per dim across all agents."""
-    out: dict[str, float] = {}
+def _per_dim_stats(results: list[SimResult]) -> dict[str, dict[str, float]]:
+    """{dim: {mean, variance}} for every resonance dim."""
+    out: dict[str, dict[str, float]] = {}
     n = len(results)
     if n == 0:
-        return {dim: 0.0 for dim in RESONANCE_DIMS}
+        return {dim: {"mean": 0.0, "variance": 0.0} for dim in RESONANCE_DIMS}
     for dim in RESONANCE_DIMS:
         scores = [r.resonance.get(dim, 5) for r in results]
         mean = sum(scores) / n
         var = sum((s - mean) ** 2 for s in scores) / n
-        out[dim] = round(var, 3)
+        out[dim] = {"mean": round(mean, 3), "variance": round(var, 3)}
     return out
+
+
+def _collapsed_dims(stats: dict[str, dict[str, float]]) -> list[str]:
+    """Dims where low variance is suspicious (not explained by mean-extreme signal)."""
+    return [
+        dim
+        for dim, s in stats.items()
+        if s["variance"] < LOW_VARIANCE_THRESHOLD
+        and COLLAPSE_MIDRANGE_LOW <= s["mean"] <= COLLAPSE_MIDRANGE_HIGH
+    ]
 
 
 def _segment_divergence(results: list[SimResult]) -> dict[str, dict[str, int]]:
@@ -99,7 +114,7 @@ async def _score_coherence(results: list[SimResult]) -> float:
 
 def _build_warnings(
     cohort_balance: dict[str, int],
-    per_dim_var: dict[str, float],
+    collapsed_dims: list[str],
     inflation: bool,
     low_conf_rate: float,
     coherence: float,
@@ -113,12 +128,11 @@ def _build_warnings(
                 f"Cohort imbalance: variant_a={cohort_balance['variant_a']} vs "
                 f"variant_b={cohort_balance['variant_b']}. Compare with care."
             )
-    collapsed_dims = [d for d, v in per_dim_var.items() if v < LOW_VARIANCE_THRESHOLD]
     if collapsed_dims:
         warnings.append(
             f"Score collapse on {', '.join(collapsed_dims)}: agents gave nearly "
-            f"identical answers across personas, suggesting the LLM defaulted "
-            f"rather than evaluated for those dimensions."
+            f"identical mid-range answers across personas, suggesting the LLM "
+            f"defaulted rather than evaluated for those dimensions."
         )
     if inflation:
         warnings.append(
@@ -172,7 +186,8 @@ async def run(run_id: str) -> AuditReport:
 
     cohort_balance = _cohort_balance(results)
     cohort_persona_balance = _cohort_persona_balance(results)
-    per_dim_var = _per_dim_variance(results)
+    dim_stats = _per_dim_stats(results)
+    per_dim_var = {dim: s["variance"] for dim, s in dim_stats.items()}
     seg_div = _segment_divergence(results)
 
     overall_mean = sum(r.resonance_overall for r in results) / len(results)
@@ -181,9 +196,10 @@ async def run(run_id: str) -> AuditReport:
     low_conf_rate = sum(1 for r in results if r.confidence == "low") / len(results)
     coherence = await _score_coherence(results)
 
-    collapsed_dim_count = sum(1 for v in per_dim_var.values() if v < LOW_VARIANCE_THRESHOLD)
+    collapsed_dims = _collapsed_dims(dim_stats)
+    collapsed_dim_count = len(collapsed_dims)
     trust = _trust_level(cohort_balance, inflation, low_conf_rate, coherence, collapsed_dim_count)
-    warnings = _build_warnings(cohort_balance, per_dim_var, inflation, low_conf_rate, coherence)
+    warnings = _build_warnings(cohort_balance, collapsed_dims, inflation, low_conf_rate, coherence)
 
     recommended_action = {
         "high":   "Results are reliable. Proceed with confidence.",

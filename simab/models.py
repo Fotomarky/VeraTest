@@ -190,7 +190,24 @@ class Synthesis(BaseModel):
         default_factory=dict,
         description="{segment: {variant_a: {dim: score}, variant_b: {dim: score}}}",
     )
-    # ── Narrative + diagnostics (kept) ────────────────────────────────────────
+    # ── Narrative agents (v0.3 P2) ───────────────────────────────────────────
+    structural_diff: list[str] = Field(
+        default_factory=list,
+        description="Factual list of design differences. NO winner judgment.",
+    )
+    hypothesis_pros: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="{variant_a: 3 reasons it may work, variant_b: 3 reasons it may work}",
+    )
+    hypothesis_cons: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="{variant_a: 3 reasons it may fail, variant_b: 3 reasons it may fail}",
+    )
+    narrative: str = Field(
+        default="",
+        description="Multi-paragraph PM-facing story from cohort_narrative agent.",
+    )
+    # ── Diagnostics (kept) ────────────────────────────────────────────────────
     coverage_score: int = Field(default=0, ge=0, le=100)
     top_friction: list[FrictionTheme] = Field(default_factory=list)
     what_worked_themes: list[FrictionTheme] = Field(default_factory=list)
