@@ -39,19 +39,11 @@ function getFoggBadge(
   const scores = foggAvg[winner] ?? foggAvg["variant_a"] ?? {};
   const motivation = scores["motivation"] ?? 10;
   const ability = scores["ability"] ?? 10;
-  const lower = theme.theme.toLowerCase();
   if (isWorked) {
     if (motivation > 7) return "Motiv ↑";
     if (ability > 7) return "Ability ↑";
     return null;
   }
-  const ctaRelated =
-    lower.includes("cta") ||
-    lower.includes("call to action") ||
-    lower.includes("unclear") ||
-    lower.includes("vague") ||
-    lower.includes("gate");
-  if (ctaRelated && ability < 5) return "Ability ↓";
   if (ability < 5) return "Ability ↓";
   if (motivation < 5) return "Motiv ↓";
   return null;
@@ -67,7 +59,7 @@ function getRecommendedFix(theme: FrictionTheme, results: SimResult[]): string |
     const ref = r.metacognitive_reflection.toLowerCase();
     if (words.some((w) => ref.includes(w))) {
       const reflection = r.metacognitive_reflection;
-      return reflection.length > 120 ? reflection.slice(0, 117) + "…" : reflection;
+      return reflection.length > 120 ? reflection.slice(0, 119) + "…" : reflection;
     }
   }
   return null;
@@ -101,9 +93,10 @@ export default function BlockersMatrix({
       b.count - a.count
   );
 
+  const sortedWorked = [...whatWorkedThemes].sort((a, b) => b.count - a.count);
   const rows = [
     ...sortedFriction.map((t) => ({ theme: t, isWorked: false })),
-    ...whatWorkedThemes.map((t) => ({ theme: t, isWorked: true })),
+    ...sortedWorked.map((t) => ({ theme: t, isWorked: true })),
   ];
 
   if (!rows.length && !trustSignalGaps.length) return null;
