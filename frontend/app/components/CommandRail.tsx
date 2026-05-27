@@ -9,7 +9,6 @@ type SynthesisForRail = {
 
 type AuditForRail = {
   trust_level: string;
-  recommended_action: string;
 };
 
 type Props = {
@@ -31,7 +30,7 @@ export default function CommandRail({
 }: Props) {
   const winner = synthesis?.winner ?? "neither";
   const voteA = Math.round((synthesis?.weighted_vote?.["variant_a"] ?? 0) * 100);
-  const voteB = Math.round((synthesis?.weighted_vote?.["variant_b"] ?? 0) * 100);
+  const voteB = 100 - voteA;
   const isComplete = status === "complete";
   const inProgress = !isComplete && status !== "failed";
 
@@ -53,6 +52,8 @@ export default function CommandRail({
             </span>
           ) : isComplete ? (
             <span className="text-xs text-emerald-600 font-medium">✓ Valid test</span>
+          ) : status === "failed" ? (
+            <span className="text-xs text-red-600 font-medium">Run failed</span>
           ) : (
             <span className="text-xs text-neutral-400">Analysing…</span>
           )}
