@@ -1,0 +1,148 @@
+"use client";
+import { useState } from "react";
+import PersonaCard from "./PersonaCard";
+
+type ScenarioCard = {
+  id: string;
+  segment: string;
+  intent: string;
+  decision_style: string;
+  device: string;
+  traffic_source: string;
+  context: string;
+  constraints: string[];
+  time_pressure: string;
+  price_sensitivity: string;
+  traffic_weight: number;
+  visual_style_preference?: string;
+  patience_threshold?: string;
+  communication_style?: string;
+};
+
+type SimResult = {
+  scenario_id: string;
+  scenario_segment: string;
+  verdict: string;
+  confidence: string;
+  outcome: string;
+  rationale: string;
+  visual_impact?: Record<string, number>;
+  attention_path?: string[];
+  messaging_alignment?: string;
+  first_impression?: string;
+  friction_points: string[];
+  what_worked: string[];
+  fogg_motivation?: number;
+  fogg_ability?: number;
+  fogg_trigger_clarity?: string;
+  trust_signals_missing?: string[];
+  loss_gain_framing?: string;
+};
+
+type Props = {
+  personas: ScenarioCard[];
+  resultsBySegment: Map<string, SimResult[]>;
+  winner: string;
+};
+
+type VerdictTint = "winner" | "loser" | "split";
+
+function getVerdictTint(results: SimResult[], winner: string): VerdictTint {
+  if (!results.length) return "split";
+  const pctA = results.filter((r) => r.verdict === "variant_a").length / results.length;
+  const pctB = results.filter((r) => r.verdict === "variant_b").length / results.length;
+  if (Math.abs(pctA - pctB) <= 0.15) return "split";
+  const preferred = pctA > pctB ? "variant_a" : "variant_b";
+  return preferred === winner ? "winner" : "loser";
+}
+
+const TINT_STRIP: Record<VerdictTint, string> = {
+  winner: "bg-emerald-400",
+  loser: "bg-red-400",
+  split: "bg-amber-400",
+};
+
+const TINT_RING: Record<VerdictTint, string> = {
+  winner: "ring-emerald-200",
+  loser: "ring-red-200",
+  split: "ring-amber-200",
+};
+
+export default function PersonaCarousel({ personas, resultsBySegment, winner }: Props) {
+  const sorted = [...personas].sort((a, b) => {
+    const aCount = resultsBySegment.get(a.segment)?.length ?? 0;
+    const bCount = resultsBySegment.get(b.segment)?.length ?? 0;
+    return bCount - aCount;
+  });
+
+  const [index, setIndex] = useState(0);
+
+  if (!sorted.length) return null;
+
+  const current = sorted[index];
+  const results = resultsBySegment.get(current.segment) ?? [];
+  const tint = getVerdictTint(results, winner);
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <h2 className="font-semibold text-sm">
+          Persona Diagnostics
+          <span className="text-neutral-400 font-normal ml-2">
+            ({sorted.length} segment{sorted.length !== 1 ? "s" : ""})
+          </span>
+        </h2>
+        <span className="text-xs text-neutral-500">
+          Persona {index + 1} of {sorted.length} · {results.length} agent
+          {results.length !== 1 ? "s" : ""} · {current.segment}
+        </span>
+      </div>
+
+      <div className="relative px-5">
+        {/* Prev arrow */}
+        {sorted.length > 1 && (
+          <button
+            onClick={() => setIndex((i) => (i - 1 + sorted.length) % sorted.length)}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white border border-neutral-200 shadow-sm hover:bg-neutral-50 text-neutral-500"
+            aria-label="Previous persona"
+          >
+            ‹
+          </button>
+        )}
+
+        {/* Card with verdict tint strip */}
+        <div className={`rounded-lg overflow-hidden ring-1 ${TINT_RING[tint]}`}>
+          <div className={`h-1 ${TINT_STRIP[tint]}`} />
+          <PersonaCard persona={current} results={results} winner={winner} />
+        </div>
+
+        {/* Next arrow */}
+        {sorted.length > 1 && (
+          <button
+            onClick={() => setIndex((i) => (i + 1) % sorted.length)}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white border border-neutral-200 shadow-sm hover:bg-neutral-50 text-neutral-500"
+            aria-label="Next persona"
+          >
+            ›
+          </button>
+        )}
+      </div>
+
+      {/* Dot indicators */}
+      {sorted.length > 1 && (
+        <div className="flex justify-center gap-1.5 mt-3">
+          {sorted.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setIndex(i)}
+              className={`h-1.5 rounded-full transition-all ${
+                i === index ? "w-3 bg-neutral-700" : "w-1.5 bg-neutral-300"
+              }`}
+              aria-label={`Go to persona ${i + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
