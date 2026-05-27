@@ -128,13 +128,13 @@ export default function CommandRail({
 
         {/* Right: coverage + actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {synthesis?.coverage_score != null && (
-            <span className="text-[10px] text-neutral-400">
-              coverage {synthesis.coverage_score}/100
-            </span>
-          )}
           {isComplete && (
             <>
+              {synthesis?.coverage_score != null && (
+                <span className="text-[10px] text-neutral-400">
+                  coverage {synthesis.coverage_score}/100
+                </span>
+              )}
               <button
                 onClick={onCopyMarkdown}
                 className="px-3 py-1 text-[10px] rounded border border-neutral-300 hover:bg-neutral-50"
