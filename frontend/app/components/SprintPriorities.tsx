@@ -13,11 +13,13 @@ type Props = {
 
 function themeToAction(theme: string): string {
   const lower = theme.toLowerCase();
-  if (lower.includes("missing") || lower.includes("lack of")) {
-    return "Add " + theme.replace(/^missing\s*/i, "").replace(/^lack of\s*/i, "");
+  if (/\bmissing\b/.test(lower) || /\black of\b/.test(lower)) {
+    const stripped = theme.replace(/^(missing|lack of)\s*/i, "").trim();
+    return stripped ? "Add " + stripped : theme;
   }
-  if (lower.includes("vague") || lower.includes("unclear")) {
-    return "Clarify " + theme.replace(/^vague\s*/i, "").replace(/^unclear\s*/i, "");
+  if (/\bvague\b/.test(lower) || /\bunclear\b/.test(lower)) {
+    const stripped = theme.replace(/^(vague|unclear)\s*/i, "").trim();
+    return stripped ? "Clarify " + stripped : theme;
   }
   return theme;
 }
@@ -41,13 +43,17 @@ export default function SprintPriorities({
 
   if (recommendation) {
     items.push({ icon: "💡", text: `Next hypothesis: ${recommendation}` });
-  } else if (topFriction[2]) {
-    const t = topFriction[2];
-    items.push({
-      icon: SEV_ICON[t.severity] ?? "🟡",
-      text: themeToAction(t.theme),
-      agents: t.count,
-    });
+  } else {
+    const third = topFriction.find(
+      (t, i) => i >= 2 && (t.severity === "high" || t.severity === "medium")
+    );
+    if (third) {
+      items.push({
+        icon: SEV_ICON[third.severity] ?? "🟡",
+        text: themeToAction(third.theme),
+        agents: third.count,
+      });
+    }
   }
 
   if (!items.length) return null;
