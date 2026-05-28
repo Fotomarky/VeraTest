@@ -36,6 +36,7 @@ type Props = {
   persona: ScenarioCard;
   results: SimResult[];
   winner: string;
+  segmentColor?: string;
 };
 
 const DEVICE_ICON: Record<string, string> = { desktop: "🖥", mobile: "📱", tablet: "📲" };
@@ -45,6 +46,41 @@ const PATIENCE_COLOR: Record<string, string> = {
   medium: "bg-amber-50 text-amber-700 border-amber-200",
   low: "bg-red-50 text-red-700 border-red-200",
 };
+
+const RESONANCE_META: Record<string, { label: string; color: string; tooltip: string }> = {
+  motivation: {
+    label: "Motivation",
+    color: "bg-blue-400",
+    tooltip: "How strongly this persona wants to take action. Driven by desire, emotion, and relevance to their goals.",
+  },
+  ability: {
+    label: "Ability",
+    color: "bg-violet-400",
+    tooltip: "How easy the page makes it to act. Low scores indicate friction: unclear steps, missing info, or cognitive overload.",
+  },
+  identity: {
+    label: "Identity",
+    color: "bg-amber-400",
+    tooltip: "How well the page matches this persona's self-image and values. High score = strong personal fit.",
+  },
+  situation: {
+    label: "Situation",
+    color: "bg-teal-400",
+    tooltip: "How their current context (time pressure, device, mindset) shapes their response to the page.",
+  },
+  beliefs: {
+    label: "Beliefs",
+    color: "bg-pink-400",
+    tooltip: "How well the page aligns with their existing worldview and prior expectations about the product or category.",
+  },
+  trigger: {
+    label: "Trigger",
+    color: "bg-orange-400",
+    tooltip: "How effectively the page prompts them to act now — urgency cues, CTAs, and timing signals.",
+  },
+};
+
+const DIM_ORDER = ["motivation", "ability", "identity", "situation", "beliefs", "trigger"];
 
 function resonancePercents(results: SimResult[]): { pctA: number; pctB: number } {
   const aScores = results.filter((r) => r.cohort === "variant_a").map((r) => r.resonance_overall);
@@ -57,13 +93,20 @@ function resonancePercents(results: SimResult[]): { pctA: number; pctB: number }
   return { pctA, pctB: 100 - pctA };
 }
 
-function avgFogg(results: SimResult[]): { motivation: number; ability: number } | null {
-  const ms = results.map((r) => r.resonance?.["motivation"] ?? 0).filter((v) => v > 0);
-  const as_ = results.map((r) => r.resonance?.["ability"] ?? 0).filter((v) => v > 0);
-  if (!ms.length && !as_.length) return null;
-  const avg = (arr: number[]) =>
-    arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : 0;
-  return { motivation: avg(ms), ability: avg(as_) };
+function avgResonanceDims(results: SimResult[]): Record<string, number> {
+  const sums: Record<string, number> = {};
+  const counts: Record<string, number> = {};
+  for (const r of results) {
+    for (const [dim, score] of Object.entries(r.resonance ?? {})) {
+      sums[dim] = (sums[dim] ?? 0) + score;
+      counts[dim] = (counts[dim] ?? 0) + 1;
+    }
+  }
+  const out: Record<string, number> = {};
+  for (const dim of Object.keys(sums)) {
+    out[dim] = Math.round((sums[dim] / counts[dim]) * 10) / 10;
+  }
+  return out;
 }
 
 function commonTrustGaps(results: SimResult[]): string[] {
@@ -79,18 +122,42 @@ function commonTrustGaps(results: SimResult[]): string[] {
     .map(([k]) => k);
 }
 
-export default function PersonaCard({ persona, results, winner }: Props) {
+function PackmanDot({ color }: { color: string }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      style={{ display: "inline-block", flexShrink: 0 }}
+      aria-hidden="true"
+    >
+      <path
+        d="M 6 6 L 10.33 3.5 A 5 5 0 1 0 10.33 8.5 Z"
+        fill={color}
+      />
+    </svg>
+  );
+}
+
+export default function PersonaCard({ persona, results, winner, segmentColor }: Props) {
   const { pctA, pctB } = resonancePercents(results);
   const winningVariant = pctA > pctB ? "variant_a" : pctB > pctA ? "variant_b" : null;
-  const fogg = avgFogg(results);
+  const dims = avgResonanceDims(results);
   const trustGaps = commonTrustGaps(results);
+  const hasDims = Object.keys(dims).length > 0;
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white overflow-hidden">
+    <div
+      className="rounded-lg border border-neutral-200 bg-white overflow-hidden"
+      style={segmentColor ? { borderLeftWidth: "4px", borderLeftColor: segmentColor } : undefined}
+    >
       {/* Header */}
       <div className="px-4 py-3 border-b border-neutral-100 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-semibold text-sm truncate">{persona.segment}</div>
+          <div className="flex items-center gap-1.5">
+            {segmentColor && <PackmanDot color={segmentColor} />}
+            <div className="font-semibold text-sm truncate">{persona.segment}</div>
+          </div>
           <p className="text-xs text-neutral-500 mt-0.5 leading-snug line-clamp-2">
             {persona.context || "No context provided"}
           </p>
@@ -132,27 +199,32 @@ export default function PersonaCard({ persona, results, winner }: Props) {
         </div>
       </div>
 
-      {/* Fogg scores */}
-      {fogg && (fogg.motivation > 0 || fogg.ability > 0) && (
-        <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <div className="text-neutral-400 mb-0.5">Motivation</div>
-            <div className="flex items-center gap-1.5">
-              <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-400 rounded-full" style={{ width: `${(fogg.motivation / 10) * 100}%` }} />
+      {/* Resonance dimensions — all 6 */}
+      {hasDims && (
+        <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          {DIM_ORDER.filter((d) => dims[d] != null).map((dim) => {
+            const meta = RESONANCE_META[dim];
+            const score = dims[dim];
+            return (
+              <div key={dim}>
+                <div
+                  className="text-neutral-400 mb-0.5 cursor-help underline decoration-dotted decoration-neutral-300"
+                  title={meta?.tooltip ?? dim}
+                >
+                  {meta?.label ?? dim}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${meta?.color ?? "bg-neutral-400"}`}
+                      style={{ width: `${(score / 10) * 100}%` }}
+                    />
+                  </div>
+                  <span className="font-medium text-neutral-700 w-6 text-right">{score}</span>
+                </div>
               </div>
-              <span className="font-medium text-neutral-700 w-6 text-right">{fogg.motivation}</span>
-            </div>
-          </div>
-          <div>
-            <div className="text-neutral-400 mb-0.5">Ability</div>
-            <div className="flex items-center gap-1.5">
-              <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                <div className="h-full bg-violet-400 rounded-full" style={{ width: `${(fogg.ability / 10) * 100}%` }} />
-              </div>
-              <span className="font-medium text-neutral-700 w-6 text-right">{fogg.ability}</span>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
 
@@ -169,7 +241,6 @@ export default function PersonaCard({ persona, results, winner }: Props) {
           </div>
         </div>
       )}
-
     </div>
   );
 }
@@ -181,4 +252,3 @@ function Badge({ children }: { children: React.ReactNode }) {
     </span>
   );
 }
-

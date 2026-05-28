@@ -63,6 +63,13 @@ function getRecommendedFix(theme: FrictionTheme, results: SimResult[]): string |
   return null;
 }
 
+const FOGG_TOOLTIP: Record<string, string> = {
+  "Ability ↓": "Ability: how easy the page makes it to take action. A low score means this persona hit friction — unclear steps, missing info, or cognitive overload.",
+  "Ability ↑": "Ability: low friction detected. The page made it easy for this segment to act.",
+  "Motiv ↓": "Motivation: how strongly this persona wants to act. A low score means weak emotional fit or poor relevance to their situation.",
+  "Motiv ↑": "Motivation: strong desire to act observed. The page resonated emotionally with this segment.",
+};
+
 const SEV_STYLES: Record<
   string,
   { border: string; bg: string; dot: string }
@@ -133,7 +140,8 @@ export default function BlockersMatrix({
                     </span>
                     {foggBadge && (
                       <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                        title={FOGG_TOOLTIP[foggBadge] ?? foggBadge}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border font-medium cursor-help ${
                           foggBadge.includes("↑")
                             ? "bg-emerald-50 border-emerald-200 text-emerald-700"
                             : "bg-red-50 border-red-200 text-red-700"
