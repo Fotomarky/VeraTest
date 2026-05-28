@@ -29,21 +29,18 @@ type ScenarioCard = {
 type SimResult = {
   scenario_id: string;
   scenario_segment: string;
-  verdict: string;
+  agent_idx: number;
+  cohort: "variant_a" | "variant_b";
+  resonance: Record<string, number>;
+  resonance_overall: number;
+  intent_signal: "would_act" | "would_research" | "would_leave";
   confidence: string;
-  outcome: string;
-  rationale: string;
-  visual_impact?: Record<string, number>;
-  attention_path?: string[];
-  messaging_alignment?: string;
-  first_impression?: string;
   friction_points: string[];
   what_worked: string[];
-  fogg_motivation?: number;
-  fogg_ability?: number;
-  fogg_trigger_clarity?: string;
+  rationale: string;
+  first_impression?: string;
+  trust_signals_found?: string[];
   trust_signals_missing?: string[];
-  loss_gain_framing?: string;
   metacognitive_reflection?: string;
 };
 
@@ -55,8 +52,9 @@ type Run = {
   simulation_results?: SimResult[];
   audit?: { trust_level: string; warnings: string[]; recommended_action: string };
   synthesis?: {
-    winner: string;
-    weighted_vote: Record<string, number>;
+    directional_winner: "variant_a" | "variant_b" | "tie";
+    cohort_resonance_overall: Record<string, number>;
+    cohort_resonance?: Record<string, Record<string, number>>;
     coverage_score: number;
     top_friction: Array<{
       theme: string;
@@ -72,9 +70,7 @@ type Run = {
     }>;
     one_line_summary?: string;
     recommendation?: string;
-    visual_impact?: Record<string, number>;
     confound_warning?: string;
-    fogg_avg?: Record<string, Record<string, number>>;
     trust_signal_gaps?: string[];
   };
   error?: string;
@@ -108,6 +104,26 @@ const PHASE_SHORT: Record<string, string> = {
   auditing: "Audit",
   synthesizing: "Synthesise",
 };
+
+function computeFoggAvg(results: SimResult[]): Record<string, Record<string, number>> {
+  const sums: Record<string, Record<string, number>> = {};
+  const counts: Record<string, number> = {};
+  for (const r of results) {
+    if (!sums[r.cohort]) { sums[r.cohort] = {}; counts[r.cohort] = 0; }
+    for (const [dim, score] of Object.entries(r.resonance ?? {})) {
+      sums[r.cohort][dim] = (sums[r.cohort][dim] ?? 0) + score;
+    }
+    counts[r.cohort]++;
+  }
+  const avgs: Record<string, Record<string, number>> = {};
+  for (const [cohort, dims] of Object.entries(sums)) {
+    avgs[cohort] = {};
+    for (const [dim, total] of Object.entries(dims)) {
+      avgs[cohort][dim] = total / counts[cohort];
+    }
+  }
+  return avgs;
+}
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -189,7 +205,8 @@ export default function RunPage({ params }: { params: { id: string } }) {
   const total = run.scenarios?.length ?? 20;
   const inProgress = run.status !== "complete" && run.status !== "failed";
   const synth = run.synthesis;
-  const winner = synth?.winner ?? "neither";
+  const winner = synth?.directional_winner ?? "tie";
+  const foggAvg = computeFoggAvg(run.simulation_results ?? []);
 
   const scenariosBySegment = new Map<string, ScenarioCard>();
   for (const sc of run.scenarios ?? []) {
@@ -255,7 +272,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
           topFriction={synth.top_friction ?? []}
           whatWorkedThemes={synth.what_worked_themes ?? []}
           trustSignalGaps={synth.trust_signal_gaps ?? []}
-          foggAvg={synth.fogg_avg ?? {}}
+          foggAvg={foggAvg}
           winner={winner}
           simulationResults={run.simulation_results ?? []}
         />
@@ -281,8 +298,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
       {synth?.recommendation && (
         <TestNextHypothesis
           recommendation={synth.recommendation}
-          topFriction={synth.top_friction ?? []}
-          foggAvg={synth.fogg_avg ?? {}}
+          foggAvg={foggAvg}
           winner={winner}
           simulationResults={run.simulation_results ?? []}
         />
@@ -291,7 +307,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
       <VisualEvidence
         runId={run.run_id}
         winner={winner}
-        visualImpact={synth?.visual_impact ?? {}}
+        visualImpact={{}}
         confoundWarning={synth?.confound_warning}
       />
     </div>

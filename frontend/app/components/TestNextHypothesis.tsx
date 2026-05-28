@@ -1,18 +1,10 @@
 type SimResult = {
   scenario_segment: string;
-  verdict: string;
-};
-
-type FrictionTheme = {
-  theme: string;
-  count: number;
-  severity: "high" | "medium" | "low";
-  example_quotes: string[];
+  cohort: "variant_a" | "variant_b";
 };
 
 type Props = {
   recommendation: string;
-  topFriction: FrictionTheme[];
   foggAvg: Record<string, Record<string, number>>;
   winner: string;
   simulationResults: SimResult[];
@@ -27,12 +19,7 @@ function findTopSegment(simulationResults: SimResult[]): string {
   return top ? top[0] : "your top segment";
 }
 
-export default function TestNextHypothesis({
-  recommendation,
-  foggAvg,
-  winner,
-  simulationResults,
-}: Props) {
+export default function TestNextHypothesis({ recommendation, foggAvg, winner, simulationResults }: Props) {
   if (!recommendation) return null;
 
   const winnerScores = foggAvg[winner] ?? foggAvg["variant_a"] ?? {};

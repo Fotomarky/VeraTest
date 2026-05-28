@@ -20,21 +20,16 @@ type ScenarioCard = {
 type SimResult = {
   scenario_id: string;
   scenario_segment: string;
-  verdict: string;
+  cohort: "variant_a" | "variant_b";
+  resonance: Record<string, number>;
+  resonance_overall: number;
   confidence: string;
-  outcome: string;
-  rationale: string;
-  visual_impact?: Record<string, number>;
-  attention_path?: string[];
-  messaging_alignment?: string;
-  first_impression?: string;
   friction_points: string[];
   what_worked: string[];
-  fogg_motivation?: number;
-  fogg_ability?: number;
-  fogg_trigger_clarity?: string;
+  rationale: string;
+  first_impression?: string;
   trust_signals_missing?: string[];
-  loss_gain_framing?: string;
+  metacognitive_reflection?: string;
 };
 
 type Props = {
@@ -51,40 +46,24 @@ const PATIENCE_COLOR: Record<string, string> = {
   low: "bg-red-50 text-red-700 border-red-200",
 };
 
-function votePercent(results: SimResult[], variant: string): number {
-  if (!results.length) return 0;
-  return Math.round((results.filter((r) => r.verdict === variant).length / results.length) * 100);
-}
-
-function avgVisualImpact(results: SimResult[]): Record<string, number> {
-  const totals: Record<string, number> = {};
-  const counts: Record<string, number> = {};
-  for (const r of results) {
-    for (const [v, score] of Object.entries(r.visual_impact || {})) {
-      totals[v] = (totals[v] || 0) + score;
-      counts[v] = (counts[v] || 0) + 1;
-    }
-  }
-  return Object.fromEntries(
-    Object.entries(totals).map(([v, t]) => [v, Math.round((t / counts[v]) * 10) / 10])
-  );
+function resonancePercents(results: SimResult[]): { pctA: number; pctB: number } {
+  const aScores = results.filter((r) => r.cohort === "variant_a").map((r) => r.resonance_overall);
+  const bScores = results.filter((r) => r.cohort === "variant_b").map((r) => r.resonance_overall);
+  const avgA = aScores.length ? aScores.reduce((s, v) => s + v, 0) / aScores.length : 0;
+  const avgB = bScores.length ? bScores.reduce((s, v) => s + v, 0) / bScores.length : 0;
+  const total = avgA + avgB;
+  if (total === 0) return { pctA: 50, pctB: 50 };
+  const pctA = Math.round((avgA / total) * 100);
+  return { pctA, pctB: 100 - pctA };
 }
 
 function avgFogg(results: SimResult[]): { motivation: number; ability: number } | null {
-  const ms = results.map((r) => r.fogg_motivation || 0).filter((v) => v > 0);
-  const as_ = results.map((r) => r.fogg_ability || 0).filter((v) => v > 0);
+  const ms = results.map((r) => r.resonance?.["motivation"] ?? 0).filter((v) => v > 0);
+  const as_ = results.map((r) => r.resonance?.["ability"] ?? 0).filter((v) => v > 0);
   if (!ms.length && !as_.length) return null;
   const avg = (arr: number[]) =>
     arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : 0;
   return { motivation: avg(ms), ability: avg(as_) };
-}
-
-function topAttentionPath(results: SimResult[]): string[] {
-  let best: string[] = [];
-  for (const r of results) {
-    if ((r.attention_path?.length || 0) > best.length) best = r.attention_path || [];
-  }
-  return best.slice(0, 5);
 }
 
 function commonTrustGaps(results: SimResult[]): string[] {
@@ -101,20 +80,10 @@ function commonTrustGaps(results: SimResult[]): string[] {
 }
 
 export default function PersonaCard({ persona, results, winner }: Props) {
-  const pctA = votePercent(results, "variant_a");
-  const pctB = votePercent(results, "variant_b");
+  const { pctA, pctB } = resonancePercents(results);
   const winningVariant = pctA > pctB ? "variant_a" : pctB > pctA ? "variant_b" : null;
-  const avgImpact = avgVisualImpact(results);
   const fogg = avgFogg(results);
-  const attentionPath = topAttentionPath(results);
   const trustGaps = commonTrustGaps(results);
-
-  const alignments = results.map((r) => r.messaging_alignment).filter(Boolean);
-  const topAlignment = alignments.length
-    ? (["strong", "moderate", "weak"].find(
-        (a) => alignments.filter((x) => x === a).length > alignments.length / 2
-      ) ?? "moderate")
-    : null;
 
   return (
     <div className="rounded-lg border border-neutral-200 bg-white overflow-hidden">
@@ -163,23 +132,6 @@ export default function PersonaCard({ persona, results, winner }: Props) {
         </div>
       </div>
 
-      {/* Visual impact scores */}
-      {(avgImpact["variant_a"] || avgImpact["variant_b"]) ? (
-        <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-2 text-xs">
-          {(["variant_a", "variant_b"] as const).map((v) => (
-            <div key={v}>
-              <div className="text-neutral-400 mb-0.5">{v === "variant_a" ? "A" : "B"} visual</div>
-              <div className="flex items-center gap-1.5">
-                <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-400 rounded-full" style={{ width: `${((avgImpact[v] || 0) / 10) * 100}%` }} />
-                </div>
-                <span className="font-medium text-neutral-700 w-6 text-right">{avgImpact[v] ?? "—"}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       {/* Fogg scores */}
       {fogg && (fogg.motivation > 0 || fogg.ability > 0) && (
         <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-2 text-xs">
@@ -204,21 +156,6 @@ export default function PersonaCard({ persona, results, winner }: Props) {
         </div>
       )}
 
-      {/* Attention path */}
-      {attentionPath.length > 0 && (
-        <div className="px-4 py-2 border-t border-neutral-100">
-          <div className="text-xs text-neutral-400 mb-1.5">Noticed in order</div>
-          <div className="flex flex-wrap gap-1">
-            {attentionPath.map((el, i) => (
-              <span key={i} className="flex items-center gap-1 text-xs bg-neutral-50 border border-neutral-200 px-2 py-0.5 rounded-full">
-                <span className="text-neutral-400 text-[10px]">{i + 1}</span>
-                {el}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Trust gaps */}
       {trustGaps.length > 0 && (
         <div className="px-4 py-2 border-t border-neutral-100">
@@ -233,13 +170,6 @@ export default function PersonaCard({ persona, results, winner }: Props) {
         </div>
       )}
 
-      {/* Messaging alignment */}
-      {topAlignment && (
-        <div className="px-4 py-2 border-t border-neutral-100 flex items-center gap-2">
-          <span className="text-xs text-neutral-400">Messaging</span>
-          <AlignmentBadge value={topAlignment} />
-        </div>
-      )}
     </div>
   );
 }
@@ -252,20 +182,3 @@ function Badge({ children }: { children: React.ReactNode }) {
   );
 }
 
-function AlignmentBadge({ value }: { value: string }) {
-  const styles: Record<string, string> = {
-    strong: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    moderate: "bg-amber-50 text-amber-700 border-amber-200",
-    weak: "bg-red-50 text-red-700 border-red-200",
-  };
-  const labels: Record<string, string> = {
-    strong: "✓ Strong match",
-    moderate: "~ Moderate match",
-    weak: "✗ Weak match",
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-medium ${styles[value] || ""}`}>
-      {labels[value] || value}
-    </span>
-  );
-}
