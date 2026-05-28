@@ -63,6 +63,18 @@ function getRecommendedFix(theme: FrictionTheme, results: SimResult[]): string |
   return null;
 }
 
+function Tip({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <span className="relative group/tip inline-block">
+      {children}
+      <span className="pointer-events-none absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded bg-neutral-800 text-white text-[10px] leading-snug px-2 py-1.5 opacity-0 group-hover/tip:opacity-100 transition-opacity whitespace-normal shadow-lg">
+        {text}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-800" />
+      </span>
+    </span>
+  );
+}
+
 const FOGG_TOOLTIP: Record<string, string> = {
   "Ability ↓": "Ability: how easy the page makes it to take action. A low score means this persona hit friction — unclear steps, missing info, or cognitive overload.",
   "Ability ↑": "Ability: low friction detected. The page made it easy for this segment to act.",
@@ -139,16 +151,17 @@ export default function BlockersMatrix({
                       {t.count} agent{t.count !== 1 ? "s" : ""}
                     </span>
                     {foggBadge && (
-                      <span
-                        title={FOGG_TOOLTIP[foggBadge] ?? foggBadge}
-                        className={`text-[10px] px-1.5 py-0.5 rounded border font-medium cursor-help ${
-                          foggBadge.includes("↑")
-                            ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                            : "bg-red-50 border-red-200 text-red-700"
-                        }`}
-                      >
-                        {foggBadge}
-                      </span>
+                      <Tip text={FOGG_TOOLTIP[foggBadge] ?? foggBadge}>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded border font-medium cursor-help ${
+                            foggBadge.includes("↑")
+                              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                              : "bg-red-50 border-red-200 text-red-700"
+                          }`}
+                        >
+                          {foggBadge}
+                        </span>
+                      </Tip>
                     )}
                   </div>
                   {fix && (

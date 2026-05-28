@@ -118,10 +118,11 @@ def _build_warnings(
     inflation: bool,
     low_conf_rate: float,
     coherence: float,
+    single_screen: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
     total = sum(cohort_balance.values())
-    if total > 0:
+    if total > 0 and not single_screen:
         diff = abs(cohort_balance["variant_a"] - cohort_balance["variant_b"])
         if diff / total > COHORT_IMBALANCE_TOLERANCE:
             warnings.append(
@@ -159,9 +160,12 @@ def _trust_level(
     low_conf_rate: float,
     coherence: float,
     collapsed_dim_count: int,
+    single_screen: bool = False,
 ) -> str:
     total = sum(cohort_balance.values())
-    cohort_skew = (abs(cohort_balance["variant_a"] - cohort_balance["variant_b"]) / total) if total else 0
+    cohort_skew = 0.0 if single_screen else (
+        (abs(cohort_balance["variant_a"] - cohort_balance["variant_b"]) / total) if total else 0
+    )
     if inflation or low_conf_rate > 0.5 or coherence < 0.5 or collapsed_dim_count >= 3:
         return "low"
     if (
@@ -184,6 +188,7 @@ async def run(run_id: str) -> AuditReport:
     if not results:
         raise ValueError("No simulation results to audit")
 
+    single_screen = not run.variant_b_path
     cohort_balance = _cohort_balance(results)
     cohort_persona_balance = _cohort_persona_balance(results)
     dim_stats = _per_dim_stats(results)
@@ -198,8 +203,8 @@ async def run(run_id: str) -> AuditReport:
 
     collapsed_dims = _collapsed_dims(dim_stats)
     collapsed_dim_count = len(collapsed_dims)
-    trust = _trust_level(cohort_balance, inflation, low_conf_rate, coherence, collapsed_dim_count)
-    warnings = _build_warnings(cohort_balance, collapsed_dims, inflation, low_conf_rate, coherence)
+    trust = _trust_level(cohort_balance, inflation, low_conf_rate, coherence, collapsed_dim_count, single_screen)
+    warnings = _build_warnings(cohort_balance, collapsed_dims, inflation, low_conf_rate, coherence, single_screen)
 
     recommended_action = {
         "high":   "Results are reliable. Proceed with confidence.",

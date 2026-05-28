@@ -38,6 +38,7 @@ type Props = {
   personas: ScenarioCard[];
   resultsBySegment: Map<string, SimResult[]>;
   winner: string;
+  isSingleScreen?: boolean;
 };
 
 type VerdictTint = "winner" | "loser" | "split";
@@ -68,7 +69,7 @@ const TINT_RING: Record<VerdictTint, string> = {
   split: "ring-amber-200",
 };
 
-export default function PersonaCarousel({ personas, resultsBySegment, winner }: Props) {
+export default function PersonaCarousel({ personas, resultsBySegment, winner, isSingleScreen }: Props) {
   const sorted = [...personas].sort((a, b) => {
     const aCount = resultsBySegment.get(a.segment)?.length ?? 0;
     const bCount = resultsBySegment.get(b.segment)?.length ?? 0;
@@ -115,7 +116,7 @@ export default function PersonaCarousel({ personas, resultsBySegment, winner }: 
         {/* Card with verdict tint strip */}
         <div className={`rounded-lg overflow-hidden ring-1 ${TINT_RING[tint]}`}>
           <div className={`h-1 ${TINT_STRIP[tint]}`} />
-          <PersonaCard persona={current} results={results} winner={winner} segmentColor={segmentColor} />
+          <PersonaCard persona={current} results={results} winner={winner} segmentColor={segmentColor} isSingleScreen={isSingleScreen} />
         </div>
 
         {/* Next arrow */}

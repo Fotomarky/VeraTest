@@ -104,7 +104,7 @@ async def create_run(
     audience_raw: str,
     persona_source: str,
     variant_a_path: str,
-    variant_b_path: str,
+    variant_b_path: Optional[str] = None,
     audience_preset: Optional[AudiencePreset] = None,
 ) -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
@@ -117,7 +117,7 @@ async def create_run(
             audience_preset_json, persona_source, variant_a_path, variant_b_path)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (run_id, "pending", now, now, goal, audience_raw,
-         preset_json, persona_source, variant_a_path, variant_b_path),
+         preset_json, persona_source, variant_a_path, variant_b_path or ""),
     )
     await db.commit()
     return run_id
@@ -154,7 +154,7 @@ async def get_run(run_id: str) -> Optional[Run]:
         audience_preset=AudiencePreset.model_validate_json(preset_json) if preset_json else None,
         persona_source=data["persona_source"],
         variant_a_path=data["variant_a_path"],
-        variant_b_path=data["variant_b_path"],
+        variant_b_path=data["variant_b_path"] or None,  # "" stored for single-screen
         brief=Brief.model_validate_json(data["brief_json"]) if data["brief_json"] else None,
         scenarios=[ScenarioCard.model_validate(s) for s in json.loads(data["scenarios_json"])],
         agent_allocations=json.loads(data["agent_allocations_json"]),

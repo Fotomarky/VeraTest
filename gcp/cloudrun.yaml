@@ -1,0 +1,49 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: veratest-backend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cpu-throttling: "false"
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "3"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 600
+      containers:
+        - image: gcr.io/PROJECT_ID/veratest-backend:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gemini-api-key
+                  key: latest
+            - name: SIMAB_DB_PATH
+              value: /tmp/simab.db
+            - name: SIMAB_UPLOAD_DIR
+              value: /tmp/uploads
+            - name: SIMAB_SIM_CONCURRENCY
+              value: "6"
+            - name: SIMAB_NUM_AGENTS
+              value: "20"
+            - name: FRONTEND_URL
+              value: https://veratest-frontend-HASH-uc.a.run.app
+          volumeMounts:
+            - name: tmpfs
+              mountPath: /tmp
+      volumes:
+        - name: tmpfs
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi

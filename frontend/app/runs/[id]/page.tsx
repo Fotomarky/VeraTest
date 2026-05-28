@@ -48,6 +48,7 @@ type Run = {
   run_id: string;
   status: string;
   goal: string;
+  variant_b_path?: string | null;
   scenarios?: ScenarioCard[];
   simulation_results?: SimResult[];
   audit?: { trust_level: string; warnings: string[]; recommended_action: string };
@@ -207,6 +208,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
   const synth = run.synthesis;
   const winner = synth?.directional_winner ?? "tie";
   const foggAvg = computeFoggAvg(run.simulation_results ?? []);
+  const isSingleScreen = !run.variant_b_path;
 
   const scenariosBySegment = new Map<string, ScenarioCard>();
   for (const sc of run.scenarios ?? []) {
@@ -285,6 +287,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
           personas={uniquePersonas}
           resultsBySegment={resultsBySegment}
           winner={winner}
+          isSingleScreen={isSingleScreen}
         />
       )}
 
@@ -311,6 +314,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
         winner={winner}
         visualImpact={{}}
         confoundWarning={synth?.confound_warning}
+        isSingleScreen={isSingleScreen}
       />
     </div>
   );

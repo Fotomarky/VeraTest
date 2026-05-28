@@ -6,6 +6,7 @@ type Props = {
   winner: string;
   visualImpact: Record<string, number>;
   confoundWarning?: string;
+  isSingleScreen?: boolean;
 };
 
 export default function VisualEvidence({
@@ -13,6 +14,7 @@ export default function VisualEvidence({
   winner,
   visualImpact,
   confoundWarning,
+  isSingleScreen,
 }: Props) {
   const [open, setOpen] = useState(!confoundWarning);
 
@@ -36,8 +38,8 @@ export default function VisualEvidence({
               Test was confounded — use for reference only.
             </p>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {(["a", "b"] as const).map((which) => {
+          <div className={`grid grid-cols-1 gap-4 ${isSingleScreen ? "max-w-md" : "sm:grid-cols-2"}`}>
+            {(isSingleScreen ? (["a"] as const) : (["a", "b"] as const)).map((which) => {
               const isWinner = winner === `variant_${which}`;
               const score = which === "a" ? scoreA : scoreB;
               return (

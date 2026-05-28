@@ -116,7 +116,9 @@ def _resonance_overall(resonance: dict[str, int]) -> float:
     return round(weighted_sum / total_w, 2) if total_w > 0 else 0.0
 
 
-def _cohort_for(agent_idx: int) -> Cohort:
+def _cohort_for(agent_idx: int, single_screen: bool) -> Cohort:
+    if single_screen:
+        return "variant_a"
     return "variant_a" if agent_idx % 2 == 0 else "variant_b"
 
 
@@ -125,7 +127,8 @@ async def run_one(run_id: str, agent_idx: int, scenario: ScenarioCard) -> SimRes
     if run is None:
         raise ValueError(f"Run {run_id} not found")
 
-    cohort = _cohort_for(agent_idx)
+    single_screen = not run.variant_b_path
+    cohort = _cohort_for(agent_idx, single_screen)
     image_path = run.variant_a_path if cohort == "variant_a" else run.variant_b_path
     image_bytes = Path(image_path).read_bytes()
 
