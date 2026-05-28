@@ -22,21 +22,16 @@ type ScenarioCard = {
 type SimResult = {
   scenario_id: string;
   scenario_segment: string;
-  verdict: string;
+  cohort: "variant_a" | "variant_b";
+  resonance: Record<string, number>;
+  resonance_overall: number;
   confidence: string;
-  outcome: string;
-  rationale: string;
-  visual_impact?: Record<string, number>;
-  attention_path?: string[];
-  messaging_alignment?: string;
-  first_impression?: string;
   friction_points: string[];
   what_worked: string[];
-  fogg_motivation?: number;
-  fogg_ability?: number;
-  fogg_trigger_clarity?: string;
+  rationale: string;
+  first_impression?: string;
   trust_signals_missing?: string[];
-  loss_gain_framing?: string;
+  metacognitive_reflection?: string;
 };
 
 type Props = {
@@ -49,10 +44,13 @@ type VerdictTint = "winner" | "loser" | "split";
 
 function getVerdictTint(results: SimResult[], winner: string): VerdictTint {
   if (!results.length) return "split";
-  const pctA = results.filter((r) => r.verdict === "variant_a").length / results.length;
-  const pctB = results.filter((r) => r.verdict === "variant_b").length / results.length;
-  if (Math.abs(pctA - pctB) <= 0.15) return "split";
-  const preferred = pctA > pctB ? "variant_a" : "variant_b";
+  const aScores = results.filter((r) => r.cohort === "variant_a").map((r) => r.resonance_overall);
+  const bScores = results.filter((r) => r.cohort === "variant_b").map((r) => r.resonance_overall);
+  if (!aScores.length || !bScores.length) return "split";
+  const avgA = aScores.reduce((s, v) => s + v, 0) / aScores.length;
+  const avgB = bScores.reduce((s, v) => s + v, 0) / bScores.length;
+  if (Math.abs(avgA - avgB) <= 1.0) return "split";
+  const preferred = avgA > avgB ? "variant_a" : "variant_b";
   return preferred === winner ? "winner" : "loser";
 }
 

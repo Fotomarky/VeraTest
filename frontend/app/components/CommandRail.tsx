@@ -1,8 +1,8 @@
 "use client";
 
 type SynthesisForRail = {
-  winner: string;
-  weighted_vote: Record<string, number>;
+  directional_winner: "variant_a" | "variant_b" | "tie";
+  cohort_resonance_overall: Record<string, number>;
   coverage_score: number;
   confound_warning?: string;
 };
@@ -28,8 +28,11 @@ export default function CommandRail({
   onCopyMarkdown,
   copied,
 }: Props) {
-  const winner = synthesis?.winner ?? "neither";
-  const voteA = Math.round((synthesis?.weighted_vote?.["variant_a"] ?? 0) * 100);
+  const winner = synthesis?.directional_winner ?? "tie";
+  const scoreA = synthesis?.cohort_resonance_overall?.["variant_a"] ?? 0;
+  const scoreB = synthesis?.cohort_resonance_overall?.["variant_b"] ?? 0;
+  const totalScore = scoreA + scoreB;
+  const voteA = totalScore > 0 ? Math.round((scoreA / totalScore) * 100) : 50;
   const voteB = 100 - voteA;
   const isComplete = status === "complete";
   const inProgress = !isComplete && status !== "failed";
@@ -73,19 +76,19 @@ export default function CommandRail({
               <div className="relative h-2 rounded-full overflow-hidden flex">
                 <div
                   className={`h-full transition-all ${
-                    winner === "neither" ? "bg-neutral-300" : "bg-blue-500"
+                    winner === "tie" ? "bg-neutral-300" : "bg-blue-500"
                   }`}
-                  style={{ width: `${winner === "neither" ? 50 : voteA}%` }}
+                  style={{ width: `${winner === "tie" ? 50 : voteA}%` }}
                 />
                 <div
                   className={`h-full transition-all ${
-                    winner === "neither" ? "bg-neutral-300" : "bg-violet-500"
+                    winner === "tie" ? "bg-neutral-300" : "bg-violet-500"
                   }`}
-                  style={{ width: `${winner === "neither" ? 50 : voteB}%` }}
+                  style={{ width: `${winner === "tie" ? 50 : voteB}%` }}
                 />
                 <div
                   className="absolute top-0 bottom-0 w-0.5 bg-white"
-                  style={{ left: `${winner === "neither" ? 50 : voteA}%` }}
+                  style={{ left: `${winner === "tie" ? 50 : voteA}%` }}
                 />
               </div>
               <div className="flex justify-between text-[10px]">
@@ -100,14 +103,14 @@ export default function CommandRail({
                 </span>
                 <span
                   className={`font-medium ${
-                    winner === "neither"
+                    winner === "tie"
                       ? "text-neutral-500"
                       : winner === "variant_a"
                       ? "text-blue-600"
                       : "text-violet-600"
                   }`}
                 >
-                  {winner === "neither"
+                  {winner === "tie"
                     ? "NO CLEAR WINNER"
                     : winner === "variant_a"
                     ? "◄ VARIANT A WINS"

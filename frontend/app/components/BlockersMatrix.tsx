@@ -10,15 +10,13 @@ type FrictionTheme = {
 
 type SimResult = {
   scenario_segment: string;
-  verdict: string;
+  cohort: "variant_a" | "variant_b";
+  resonance: Record<string, number>;
   confidence: string;
-  outcome: string;
   rationale: string;
   friction_points: string[];
   what_worked: string[];
   metacognitive_reflection?: string;
-  fogg_motivation?: number;
-  fogg_ability?: number;
 };
 
 type Props = {
