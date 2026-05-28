@@ -1,6 +1,7 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Gemini-Flash%20%7C%20Flash--Lite-4285F4?style=for-the-badge&logo=google&logoColor=white" />
+  <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" />
   <img src="https://img.shields.io/badge/Arize-Phoenix%20Observability-7C3AED?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Gemini-Flash%20%7C%20Flash--Lite-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img src="https://img.shields.io/badge/Tests-32%20passing-22C55E?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge" />
   <img src="https://img.shields.io/badge/MCP-native-0EA5E9?style=for-the-badge" />
@@ -9,7 +10,11 @@
 <h1 align="center">SimAB — Synthetic UX Pretest Engine</h1>
 
 <p align="center">
-  <strong>20 AI agents simulate your audience. They evaluate your landing page variants like real people do — one cognitive phase at a time — before you buy a single click of traffic.</strong>
+  <strong>20 AI agents simulate your target audience evaluating your landing page design — before you spend a cent on traffic.</strong>
+</p>
+
+<p align="center">
+  Upload one design for friction analysis. Upload two to find the directional winner.
 </p>
 
 <p align="center">
@@ -22,9 +27,9 @@
 
 ---
 
-## The problem with A/B testing
+## The problem with guessing about your design
 
-Most teams spend $5,000–$50,000 in paid traffic to learn that one of their two landing page variants converts better. By the time the test reaches statistical significance:
+Most teams launch a single design and hope for the best, or spend $5,000–$50,000 in paid traffic to learn which of two variants converts better. By the time you get real data:
 
 - The campaign has already burned most of its budget on the losing variant
 - You know **what** won — but not **why**, or which audience segment drove the result
@@ -86,6 +91,18 @@ Most teams spend $5,000–$50,000 in paid traffic to learn that one of their two
 ```
 
 **Total runtime: ~90 seconds.** You get a full synthesis: winner, weighted vote, Fogg diagnostics, trust signal gaps, friction themes by persona, attention paths, and messaging alignment — all before touching your ad budget.
+
+---
+
+## Three evaluation modes
+
+| Mode | What you upload | What you get |
+|---|---|---|
+| **Single design** | One screenshot | Resonance score, friction themes, trust gaps, sprint stories |
+| **A/B pretest** | Two variants | All of the above + directional winner with gap significance |
+| **N-variant** *(roadmap)* | 3+ variants | Ranked resonance matrix |
+
+Start with a single design analysis — it's the fastest way to understand your audience before you build variant B.
 
 ---
 
