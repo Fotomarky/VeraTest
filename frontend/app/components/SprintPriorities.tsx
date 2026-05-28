@@ -9,6 +9,8 @@ type Props = {
   topFriction: FrictionTheme[];
   recommendation?: string;
   confoundWarning?: string;
+  totalAgents?: number;
+  personaCount?: number;
 };
 
 function themeToAction(theme: string): string {
@@ -30,6 +32,8 @@ export default function SprintPriorities({
   topFriction,
   recommendation,
   confoundWarning,
+  totalAgents,
+  personaCount,
 }: Props) {
   const highMed = topFriction
     .filter((t) => t.severity === "high" || t.severity === "medium")
@@ -60,12 +64,26 @@ export default function SprintPriorities({
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5">
-      <h2 className="font-semibold text-sm mb-3">Sprint Priorities</h2>
-      {confoundWarning && (
-        <p className="text-xs text-orange-600 bg-orange-50 rounded px-3 py-2 mb-3">
-          ⚠ Test was confounded — treat these priorities as directional, not conclusive.
-        </p>
-      )}
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 className="font-semibold text-sm">Sprint Priorities</h2>
+        <div className="flex items-center gap-1.5">
+          {totalAgents != null && (
+            <span className="text-[11px] px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 font-mono">
+              {totalAgents} agents
+            </span>
+          )}
+          {personaCount != null && (
+            <span className="text-[11px] px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 font-mono">
+              {personaCount} segment{personaCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          {confoundWarning && (
+            <span className="text-[11px] text-orange-500" title={confoundWarning}>
+              ⚠ directional
+            </span>
+          )}
+        </div>
+      </div>
       <ol className="space-y-2">
         {items.map((item, i) => (
           <li key={i} className="flex items-start gap-3 text-sm">

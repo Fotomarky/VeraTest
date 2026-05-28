@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import ArcadeTheater from "../../components/ArcadeTheater";
+import PackmanTheater from "../../components/PackmanTheater";
 import CommandRail from "../../components/CommandRail";
 import SprintPriorities from "../../components/SprintPriorities";
 import BlockersMatrix from "../../components/BlockersMatrix";
@@ -239,7 +239,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
       />
 
       {inProgress && (
-        <ArcadeTheater
+        <PackmanTheater
           run={run}
           fallback={
             <ProgressBlock
@@ -264,6 +264,8 @@ export default function RunPage({ params }: { params: { id: string } }) {
           topFriction={synth.top_friction ?? []}
           recommendation={synth.recommendation}
           confoundWarning={synth.confound_warning}
+          totalAgents={run.simulation_results?.length ?? total}
+          personaCount={uniquePersonas.length}
         />
       )}
 
@@ -389,3 +391,4 @@ function ProgressBlock({
     </div>
   );
 }
+

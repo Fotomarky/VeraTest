@@ -54,6 +54,8 @@ function getVerdictTint(results: SimResult[], winner: string): VerdictTint {
   return preferred === winner ? "winner" : "loser";
 }
 
+const SEGMENT_COLORS = ["#F5C518", "#4FC3F7", "#81C784", "#FF8A65", "#CE93D8"];
+
 const TINT_STRIP: Record<VerdictTint, string> = {
   winner: "bg-emerald-400",
   loser: "bg-red-400",
@@ -80,6 +82,8 @@ export default function PersonaCarousel({ personas, resultsBySegment, winner }: 
   const current = sorted[index];
   const results = resultsBySegment.get(current.segment) ?? [];
   const tint = getVerdictTint(results, winner);
+  const originalIndex = personas.indexOf(current);
+  const segmentColor = originalIndex >= 0 ? SEGMENT_COLORS[originalIndex % SEGMENT_COLORS.length] : undefined;
 
   return (
     <section>
@@ -111,7 +115,7 @@ export default function PersonaCarousel({ personas, resultsBySegment, winner }: 
         {/* Card with verdict tint strip */}
         <div className={`rounded-lg overflow-hidden ring-1 ${TINT_RING[tint]}`}>
           <div className={`h-1 ${TINT_STRIP[tint]}`} />
-          <PersonaCard persona={current} results={results} winner={winner} />
+          <PersonaCard persona={current} results={results} winner={winner} segmentColor={segmentColor} />
         </div>
 
         {/* Next arrow */}
