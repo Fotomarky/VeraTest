@@ -141,6 +141,84 @@ Respond with ONLY a JSON object:
 }}
 """
 
+PROMPT_SINGLE = """\
+You are a UX research assistant analyzing a single landing page design.
+
+CONVERSION GOAL: {goal}
+
+AUDIENCE INPUT:
+---
+{audience_block}
+---
+
+You will receive one landing page image to analyze.
+
+Your task: produce a structured brief. Extract or infer:
+
+1. variant_a_summary — 1-sentence describing what the page communicates
+   (offer, audience signals, primary CTA).
+
+2. inferred_personas — array of 3-7 persona objects. Rules:
+   - If audience input is a STRUCTURED AUDIENCE PRESET (chip selections),
+     treat each persona as a coherent intersection of those selections. Honor
+     the selected age_ranges, roles, industries, interests, behaviors, and
+     devices as constraints — do NOT invent personas that contradict them.
+   - If audience input contains structured persona data, preserve and normalize.
+   - If audience input is free text or a brief, extract the segments.
+   - If audience input is empty, derive 5 plausible personas from what
+     the page visuals suggest about the target audience.
+   - Each persona must include ALL of:
+     * segment (string label)
+     * intent: "evaluate" | "buy" | "compare" | "browse"
+     * decision_style: "analytical" | "impulse" | "cautious" | "social"
+     * device: "desktop" | "mobile" | "tablet"
+     * traffic_source (string)
+     * context: one sentence describing their current situation
+     * constraints: list of strings (0-3 situational constraints)
+     * time_pressure: "high" | "medium" | "low"
+     * price_sensitivity: "high" | "medium" | "low"
+     * traffic_weight (0-1, all personas must sum to ~1.0)
+     * visual_style_preference: one of "clean/minimal", "emotional/imagery-driven",
+       "information-dense", "trust-signal-focused", "social-proof-driven"
+     * patience_threshold: "high" | "medium" | "low"
+     * communication_style: how this persona prefers information delivered.
+     * accessibility_flags: [] (empty unless obvious from audience input)
+     * locale: e.g. "en-US"
+
+3. test_type — "pre_release" by default.
+
+Respond with ONLY a JSON object:
+{{
+  "conversion_goal": "...",
+  "variant_a_summary": "...",
+  "variant_b_summary": "",
+  "key_differences": [],
+  "test_type": "pre_release",
+  "inferred_personas": [
+    {{
+      "id": "sc_001",
+      "segment": "...",
+      "intent": "evaluate",
+      "decision_style": "analytical",
+      "device": "desktop",
+      "traffic_source": "...",
+      "context": "...",
+      "constraints": ["..."],
+      "time_pressure": "medium",
+      "price_sensitivity": "medium",
+      "traffic_weight": 0.30,
+      "visual_style_preference": "clean/minimal",
+      "patience_threshold": "medium",
+      "communication_style": "concise bullet points",
+      "accessibility_flags": [],
+      "locale": "en-US"
+    }}
+  ],
+  "needs_clarification": false,
+  "notes": ""
+}}
+"""
+
 
 async def run(run_id: str) -> Brief:
     """Read inputs from shared state, write brief back."""
@@ -150,17 +228,21 @@ async def run(run_id: str) -> Brief:
 
     await state.set_status(run_id, "normalizing")
 
-    # Load images from disk
     img_a = Path(run.variant_a_path).read_bytes()
-    img_b = Path(run.variant_b_path).read_bytes()
-
     audience_block = _format_audience_block(run.audience_preset, run.audience_raw)
-    prompt = PROMPT.format(goal=run.goal, audience_block=audience_block)
+
+    if run.variant_b_path:
+        img_b = Path(run.variant_b_path).read_bytes()
+        prompt = PROMPT.format(goal=run.goal, audience_block=audience_block)
+        images = [img_a, img_b]
+    else:
+        prompt = PROMPT_SINGLE.format(goal=run.goal, audience_block=audience_block)
+        images = [img_a]
 
     raw = await generate(
         model=MODEL_FLASH,
         prompt=prompt,
-        images=[img_a, img_b],
+        images=images,
         response_schema={},
         temperature=0.2,
     )

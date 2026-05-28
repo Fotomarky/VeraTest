@@ -21,7 +21,8 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
+from typing import Optional
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from sse_starlette.sse import EventSourceResponse
@@ -74,24 +75,30 @@ async def health() -> dict:
 async def create_run(
     background_tasks: BackgroundTasks,
     variant_a: UploadFile,
-    variant_b: UploadFile,
+    variant_b: Optional[UploadFile] = File(None),
     goal: str = Form(...),
     audience: str = Form(""),
     audience_preset: str = Form(""),
     persona_source: str = Form("paste"),
 ) -> CreateRunResponse:
-    """Create a run and kick off the pipeline in the background."""
-    if not variant_a or not variant_b:
-        raise HTTPException(status_code=400, detail="Both variants are required")
+    """Create a run and kick off the pipeline in the background.
+
+    variant_b is optional — omit it for single-screen design analysis.
+    """
+    if not variant_a:
+        raise HTTPException(status_code=400, detail="variant_a is required")
 
     # Save uploads to disk
     upload_root = Path(CONFIG.upload_dir)
     upload_root.mkdir(parents=True, exist_ok=True)
     suffix = uuid.uuid4().hex[:8]
     a_path = upload_root / f"{suffix}_a_{variant_a.filename}"
-    b_path = upload_root / f"{suffix}_b_{variant_b.filename}"
     a_path.write_bytes(await variant_a.read())
-    b_path.write_bytes(await variant_b.read())
+    b_path_str: Optional[str] = None
+    if variant_b:
+        b_path = upload_root / f"{suffix}_b_{variant_b.filename}"
+        b_path.write_bytes(await variant_b.read())
+        b_path_str = str(b_path)
 
     # Parse audience_preset JSON if provided. Empty string means "no preset".
     preset_obj: AudiencePreset | None = None
@@ -111,7 +118,7 @@ async def create_run(
         audience_preset=preset_obj,
         persona_source=persona_source,
         variant_a_path=str(a_path),
-        variant_b_path=str(b_path),
+        variant_b_path=b_path_str,
     )
 
     # Run in background — Cloud Run / uvicorn handle async tasks fine
@@ -184,6 +191,8 @@ async def get_run_image(run_id: str, which: str):
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     path = run.variant_a_path if which == "a" else run.variant_b_path
+    if not path:
+        raise HTTPException(status_code=404, detail="Variant not available for this run")
     return FileResponse(path)
 
 

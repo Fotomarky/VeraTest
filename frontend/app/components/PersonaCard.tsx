@@ -37,6 +37,7 @@ type Props = {
   results: SimResult[];
   winner: string;
   segmentColor?: string;
+  isSingleScreen?: boolean;
 };
 
 const DEVICE_ICON: Record<string, string> = { desktop: "🖥", mobile: "📱", tablet: "📲" };
@@ -122,24 +123,37 @@ function commonTrustGaps(results: SimResult[]): string[] {
     .map(([k]) => k);
 }
 
-function PackmanDot({ color }: { color: string }) {
+function Tip({ text, children }: { text: string; children: React.ReactNode }) {
   return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      style={{ display: "inline-block", flexShrink: 0 }}
-      aria-hidden="true"
-    >
-      <path
-        d="M 6 6 L 10.33 3.5 A 5 5 0 1 0 10.33 8.5 Z"
-        fill={color}
-      />
+    <span className="relative group/tip inline-block">
+      {children}
+      <span className="pointer-events-none absolute z-50 bottom-full left-0 mb-2 w-56 rounded bg-neutral-800 text-white text-[10px] leading-snug px-2 py-1.5 opacity-0 group-hover/tip:opacity-100 transition-opacity whitespace-normal shadow-lg">
+        {text}
+        <span className="absolute top-full left-0 ml-2 border-4 border-transparent border-t-neutral-800" />
+      </span>
+    </span>
+  );
+}
+
+function AgentDot({ color }: { color: string }) {
+  return (
+    <svg width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"
+         style={{ display: "inline-block", flexShrink: 0 }}>
+      {/* Hat */}
+      <rect x="3" y="0" width="6" height="2" fill="#5C3A1E" />
+      <rect x="2" y="2" width="8" height="1" fill="#5C3A1E" />
+      {/* Head */}
+      <rect x="4" y="3" width="4" height="3" fill="#F5CBA7" />
+      {/* Body — segment color */}
+      <rect x="3" y="6" width="6" height="4" fill={color} />
+      {/* Legs */}
+      <rect x="3" y="10" width="2" height="4" fill="#2C3E50" />
+      <rect x="7" y="10" width="2" height="4" fill="#2C3E50" />
     </svg>
   );
 }
 
-export default function PersonaCard({ persona, results, winner, segmentColor }: Props) {
+export default function PersonaCard({ persona, results, winner, segmentColor, isSingleScreen }: Props) {
   const { pctA, pctB } = resonancePercents(results);
   const winningVariant = pctA > pctB ? "variant_a" : pctB > pctA ? "variant_b" : null;
   const dims = avgResonanceDims(results);
@@ -155,7 +169,7 @@ export default function PersonaCard({ persona, results, winner, segmentColor }: 
       <div className="px-4 py-3 border-b border-neutral-100 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            {segmentColor && <PackmanDot color={segmentColor} />}
+            {segmentColor && <AgentDot color={segmentColor} />}
             <div className="font-semibold text-sm truncate">{persona.segment}</div>
           </div>
           <p className="text-xs text-neutral-500 mt-0.5 leading-snug line-clamp-2">
@@ -176,28 +190,30 @@ export default function PersonaCard({ persona, results, winner, segmentColor }: 
         </div>
       </div>
 
-      {/* Vote bar */}
-      <div className="px-4 pt-3 pb-1">
-        <div className="flex items-center justify-between text-xs text-neutral-500 mb-1">
-          <span>Variant A</span>
-          <span className="font-medium text-neutral-800">{results.length} agent{results.length !== 1 ? "s" : ""}</span>
-          <span>Variant B</span>
+      {/* Vote bar — hidden in single-screen mode */}
+      {!isSingleScreen && (
+        <div className="px-4 pt-3 pb-1">
+          <div className="flex items-center justify-between text-xs text-neutral-500 mb-1">
+            <span>Variant A</span>
+            <span className="font-medium text-neutral-800">{results.length} agent{results.length !== 1 ? "s" : ""}</span>
+            <span>Variant B</span>
+          </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-neutral-100">
+            <div
+              className={`h-full transition-all ${winner === "variant_a" && winningVariant === "variant_a" ? "bg-emerald-500" : "bg-blue-400"}`}
+              style={{ width: `${pctA}%` }}
+            />
+            <div
+              className={`h-full transition-all ${winner === "variant_b" && winningVariant === "variant_b" ? "bg-emerald-500" : "bg-violet-400"}`}
+              style={{ width: `${pctB}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-xs font-medium mt-1">
+            <span className={winningVariant === "variant_a" ? "text-emerald-700" : "text-neutral-400"}>{pctA}%</span>
+            <span className={winningVariant === "variant_b" ? "text-emerald-700" : "text-neutral-400"}>{pctB}%</span>
+          </div>
         </div>
-        <div className="flex h-2 rounded-full overflow-hidden bg-neutral-100">
-          <div
-            className={`h-full transition-all ${winner === "variant_a" && winningVariant === "variant_a" ? "bg-emerald-500" : "bg-blue-400"}`}
-            style={{ width: `${pctA}%` }}
-          />
-          <div
-            className={`h-full transition-all ${winner === "variant_b" && winningVariant === "variant_b" ? "bg-emerald-500" : "bg-violet-400"}`}
-            style={{ width: `${pctB}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-xs font-medium mt-1">
-          <span className={winningVariant === "variant_a" ? "text-emerald-700" : "text-neutral-400"}>{pctA}%</span>
-          <span className={winningVariant === "variant_b" ? "text-emerald-700" : "text-neutral-400"}>{pctB}%</span>
-        </div>
-      </div>
+      )}
 
       {/* Resonance dimensions — all 6 */}
       {hasDims && (
@@ -207,12 +223,11 @@ export default function PersonaCard({ persona, results, winner, segmentColor }: 
             const score = dims[dim];
             return (
               <div key={dim}>
-                <div
-                  className="text-neutral-400 mb-0.5 cursor-help underline decoration-dotted decoration-neutral-300"
-                  title={meta?.tooltip ?? dim}
-                >
-                  {meta?.label ?? dim}
-                </div>
+                <Tip text={meta?.tooltip ?? dim}>
+                  <div className="text-neutral-400 mb-0.5 cursor-help underline decoration-dotted decoration-neutral-300 inline-block">
+                    {meta?.label ?? dim}
+                  </div>
+                </Tip>
                 <div className="flex items-center gap-1.5">
                   <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
                     <div

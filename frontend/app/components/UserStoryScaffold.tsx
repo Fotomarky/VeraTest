@@ -106,7 +106,7 @@ export default function UserStoryScaffold({
         {highMed.map((t, i) => {
           const persona = findPrimaryPersona(t, resultsBySegment);
           const need = themeToNeed(t.theme);
-          const text = `As a ${persona},\nI need ${need},\nso that ${goal}.`;
+          const text = `As a ${persona},\nI need ${need},\nso that I can ${goal}.`;
           const key = `friction-${i}`;
           return (
             <div

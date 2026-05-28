@@ -28,14 +28,15 @@ export default function CommandRail({
   onCopyMarkdown,
   copied,
 }: Props) {
+  const isComplete = status === "complete";
+  const inProgress = !isComplete && status !== "failed";
   const winner = synthesis?.directional_winner ?? "tie";
   const scoreA = synthesis?.cohort_resonance_overall?.["variant_a"] ?? 0;
   const scoreB = synthesis?.cohort_resonance_overall?.["variant_b"] ?? 0;
+  const isSingleScreen = isComplete && scoreA > 0 && scoreB === 0;
   const totalScore = scoreA + scoreB;
   const voteA = totalScore > 0 ? Math.round((scoreA / totalScore) * 100) : 50;
   const voteB = 100 - voteA;
-  const isComplete = status === "complete";
-  const inProgress = !isComplete && status !== "failed";
 
   const confoundWarning = synthesis?.confound_warning;
   const trustIssue =
@@ -62,7 +63,7 @@ export default function CommandRail({
           )}
         </div>
 
-        {/* Center: balance bar */}
+        {/* Center: balance bar or single-screen resonance badge */}
         <div className="flex-1 min-w-0">
           {inProgress ? (
             <div className="space-y-1">
@@ -70,6 +71,18 @@ export default function CommandRail({
                 <div className="h-full bg-neutral-300 rounded-full animate-pulse w-1/3" />
               </div>
               <p className="text-[10px] text-neutral-400 text-center">Simulating…</p>
+            </div>
+          ) : isComplete && isSingleScreen ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="h-2 rounded-full overflow-hidden flex-1 bg-neutral-100">
+                <div
+                  className="h-full bg-blue-400 transition-all"
+                  style={{ width: `${(scoreA / 10) * 100}%` }}
+                />
+              </div>
+              <span className="text-[11px] font-medium text-neutral-700 whitespace-nowrap">
+                {scoreA.toFixed(1)}/10 resonance
+              </span>
             </div>
           ) : isComplete ? (
             <div className="space-y-1">

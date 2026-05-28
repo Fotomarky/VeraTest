@@ -32,6 +32,7 @@ export default function NewRunPage() {
   const [hasLastPreset, setHasLastPreset] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   // Detect "last audience" availability after mount (localStorage is client-only)
   useEffect(() => {
@@ -73,19 +74,16 @@ export default function NewRunPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!variantA || !variantB) {
-      setError("Both variant images are required");
-      return;
-    }
-    if (!goal.trim()) {
-      setError("A conversion goal is required");
+    setSubmitted(true);
+    if (!variantA || !goal.trim()) {
+      setError("Please fill in the highlighted fields above.");
       return;
     }
     setSubmitting(true);
     setError(null);
     const form = new FormData();
     form.append("variant_a", variantA);
-    form.append("variant_b", variantB);
+    if (variantB) form.append("variant_b", variantB);
     form.append("goal", goal);
     if (!isEmptyPreset(preset)) {
       form.append("audience_preset", JSON.stringify(preset));
@@ -105,7 +103,7 @@ export default function NewRunPage() {
     }
   }
 
-  const canSubmit = variantA && variantB && goal.trim() && !submitting;
+  const canSubmit = variantA && goal.trim() && !submitting;
   const selectedCount =
     preset.age_ranges.length +
     preset.roles.length +
@@ -133,16 +131,19 @@ export default function NewRunPage() {
             file={variantA}
             preview={previewA}
             onChange={(f) => handleFile("a", f)}
+            hasError={submitted && !variantA}
           />
           <FileSlot
             label="Variant B"
+            labelSuffix="optional — skip for single-design analysis"
             file={variantB}
             preview={previewB}
             onChange={(f) => handleFile("b", f)}
           />
         </div>
         <p className="text-xs text-neutral-500">
-          PNG or JPG. Aim for 1200×800 or larger so the agents can read fine detail.
+          PNG or JPG, 1200×800 or larger recommended.
+          Upload only Variant A to analyze a single design without comparison.
         </p>
       </section>
 
@@ -154,7 +155,11 @@ export default function NewRunPage() {
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           placeholder="What action should visitors take?"
-          className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+          className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+            submitted && !goal.trim()
+              ? "border-red-400 ring-red-200 focus:ring-red-400 bg-red-50"
+              : "border-neutral-300 focus:ring-neutral-900"
+          }`}
         />
         <div className="flex flex-wrap gap-1.5">
           <span className="text-xs text-neutral-500 mr-1 self-center">Examples:</span>
@@ -325,18 +330,28 @@ function ChipGroup({
 
 function FileSlot({
   label,
+  labelSuffix,
   file,
   preview,
   onChange,
+  hasError,
 }: {
   label: string;
+  labelSuffix?: string;
   file: File | null;
   preview: string | null;
   onChange: (f: File | null) => void;
+  hasError?: boolean;
 }) {
   return (
     <div>
-      <span className="text-sm font-medium block mb-1">{label}</span>
+      <span className={`text-sm font-medium block mb-1 ${hasError ? "text-red-600" : ""}`}>
+        {label}
+        {hasError && <span className="ml-1 text-xs font-normal text-red-500">— required</span>}
+        {!hasError && labelSuffix && (
+          <span className="ml-1 text-xs font-normal text-neutral-400">{labelSuffix}</span>
+        )}
+      </span>
       {preview ? (
         <div className="relative group">
           <img
@@ -358,7 +373,11 @@ function FileSlot({
           <div className="text-xs text-neutral-500 mt-1 truncate">{file?.name}</div>
         </div>
       ) : (
-        <label className="block rounded border-2 border-dashed border-neutral-300 h-48 flex items-center justify-center cursor-pointer hover:border-neutral-500 hover:bg-neutral-50 transition">
+        <label className={`block rounded border-2 border-dashed h-48 flex items-center justify-center cursor-pointer transition ${
+          hasError
+            ? "border-red-400 bg-red-50 hover:border-red-500"
+            : "border-neutral-300 hover:border-neutral-500 hover:bg-neutral-50"
+        }`}>
           <input
             type="file"
             accept="image/*"
@@ -366,7 +385,7 @@ function FileSlot({
             onChange={(e) => onChange(e.target.files?.[0] || null)}
           />
           <div className="text-center px-4">
-            <div className="text-sm text-neutral-700 mb-1">Click to upload</div>
+            <div className={`text-sm mb-1 ${hasError ? "text-red-600" : "text-neutral-700"}`}>Click to upload</div>
             <div className="text-xs text-neutral-500">PNG or JPG, any size</div>
           </div>
         </label>

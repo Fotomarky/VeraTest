@@ -67,8 +67,8 @@ class AudiencePreset(BaseModel):
 class Brief(BaseModel):
     conversion_goal: str
     variant_a_summary: str
-    variant_b_summary: str
-    key_differences: list[str]
+    variant_b_summary: str = ""  # empty for single-screen runs
+    key_differences: list[str] = Field(default_factory=list)
     test_type: Literal["pre_release", "post_release"] = "pre_release"
     inferred_personas: list[ScenarioCard] = Field(default_factory=list)
     needs_clarification: bool = False
@@ -248,7 +248,7 @@ class Run(BaseModel):
     audience_preset: Optional[AudiencePreset] = None  # v0.3 chip selector input
     persona_source: Literal["paste", "ga4", "auto", "library", "preset"] = "paste"
     variant_a_path: str
-    variant_b_path: str
+    variant_b_path: Optional[str] = None  # None = single-screen mode
 
     # Agent outputs (set incrementally by each agent — the pheromone trail)
     brief: Optional[Brief] = None

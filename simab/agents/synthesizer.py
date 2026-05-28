@@ -67,6 +67,22 @@ more strongly with Y persona".
 Respond with ONLY: {{"one_line": "...", "recommendation": "..."}}
 """
 
+SINGLE_SCREEN_SUMMARY_PROMPT = """\
+Write a one-sentence executive summary and a 2-sentence recommendation for this
+single-design UX analysis.
+
+OVERALL RESONANCE:   {overall:.2f}/10 (persona-page fit score, 1-10 scale)
+TRUST LEVEL:         {trust}
+TOP FRICTION THEMES:
+{themes}
+
+Phrase carefully: this measures persona-page RESONANCE for a single design —
+it is NOT a conversion rate prediction. Focus on what to improve. Use language
+like "the design resonates at {overall:.1f}/10 overall" and "key friction is...".
+
+Respond with ONLY: {{"one_line": "...", "recommendation": "..."}}
+"""
+
 
 TIE_GAP_FLOOR = 0.3        # absolute |gap| below this -> tie regardless of std
 STRONG_GAP_FLOOR = 0.8     # absolute |gap| floor for "strong" significance
@@ -248,49 +264,71 @@ async def run(run_id: str) -> Synthesis:
     await state.set_status(run_id, "synthesizing")
 
     results = run.simulation_results
+    single_screen = not run.variant_b_path
+
     by_cohort = _partition_by_cohort(results)
-
-    cohort_res = _cohort_resonance(by_cohort)
-    cohort_overall = _cohort_overall(cohort_res)
-    gap = round(cohort_overall.get("variant_b", 0.0) - cohort_overall.get("variant_a", 0.0), 3)
-    pooled = _pooled_std(by_cohort)
-    directional_winner, gap_significance = _verdict(gap, pooled)
-
     per_persona = _per_persona_resonance(results)
     segments = _segment_splits(results)
     coverage = _coverage_score(run.scenarios, results)
     trust_gaps = _collect_trust_gaps(results)
 
-    # Cluster friction (losing cohort) and what_worked (winning cohort).
-    if directional_winner == "tie":
-        losing_items = results
-        winning_items = results
-    else:
-        winning_items = by_cohort[directional_winner]
-        losing_items = by_cohort[
-            "variant_a" if directional_winner == "variant_b" else "variant_b"
-        ]
-    top_friction = await _cluster_friction(losing_items, "friction_points", "FRICTION POINTS")
-    worked_themes = await _cluster_friction(winning_items, "what_worked", "WHAT WORKED")
-
     confound_warning: str | None = None
     if run.brief and run.brief.needs_clarification and run.brief.notes:
         confound_warning = run.brief.notes
 
-    summary_raw = await generate(
-        model=MODEL_FLASH,
-        prompt=SUMMARY_PROMPT.format(
-            winner=directional_winner,
-            gap=gap,
-            significance=gap_significance,
-            trust=run.audit.trust_level,
-            a_overall=cohort_overall.get("variant_a", 0.0),
-            b_overall=cohort_overall.get("variant_b", 0.0),
-            themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
-        ),
-        response_schema={},
-        temperature=0.4,
-    )
+    if single_screen:
+        # Single-screen: only variant_a cohort exists; no comparison possible.
+        cohort_res = _cohort_resonance({"variant_a": results})
+        cohort_overall = _cohort_overall(cohort_res)
+        gap = 0.0
+        directional_winner, gap_significance = "tie", "tie"
+
+        top_friction = await _cluster_friction(results, "friction_points", "FRICTION POINTS")
+        worked_themes = await _cluster_friction(results, "what_worked", "WHAT WORKED")
+
+        overall_score = cohort_overall.get("variant_a", 0.0)
+        summary_raw = await generate(
+            model=MODEL_FLASH,
+            prompt=SINGLE_SCREEN_SUMMARY_PROMPT.format(
+                overall=overall_score,
+                trust=run.audit.trust_level,
+                themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
+            ),
+            response_schema={},
+            temperature=0.4,
+        )
+    else:
+        cohort_res = _cohort_resonance(by_cohort)
+        cohort_overall = _cohort_overall(cohort_res)
+        gap = round(cohort_overall.get("variant_b", 0.0) - cohort_overall.get("variant_a", 0.0), 3)
+        pooled = _pooled_std(by_cohort)
+        directional_winner, gap_significance = _verdict(gap, pooled)
+
+        if directional_winner == "tie":
+            losing_items = results
+            winning_items = results
+        else:
+            winning_items = by_cohort[directional_winner]
+            losing_items = by_cohort[
+                "variant_a" if directional_winner == "variant_b" else "variant_b"
+            ]
+        top_friction = await _cluster_friction(losing_items, "friction_points", "FRICTION POINTS")
+        worked_themes = await _cluster_friction(winning_items, "what_worked", "WHAT WORKED")
+
+        summary_raw = await generate(
+            model=MODEL_FLASH,
+            prompt=SUMMARY_PROMPT.format(
+                winner=directional_winner,
+                gap=gap,
+                significance=gap_significance,
+                trust=run.audit.trust_level,
+                a_overall=cohort_overall.get("variant_a", 0.0),
+                b_overall=cohort_overall.get("variant_b", 0.0),
+                themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
+            ),
+            response_schema={},
+            temperature=0.4,
+        )
 
     synthesis = Synthesis(
         cohort_resonance=cohort_res,
