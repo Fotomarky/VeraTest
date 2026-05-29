@@ -75,7 +75,7 @@ async def health() -> dict:
 async def create_run(
     background_tasks: BackgroundTasks,
     variant_a: UploadFile,
-    variant_b: Optional[UploadFile] = File(None),
+    variant_b: Optional[UploadFile] = None,
     goal: str = Form(...),
     audience: str = Form(""),
     audience_preset: str = Form(""),

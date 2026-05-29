@@ -282,6 +282,7 @@ async def run(run_id: str) -> Synthesis:
         cohort_overall = _cohort_overall(cohort_res)
         gap = 0.0
         directional_winner, gap_significance = "tie", "tie"
+        pooled = 0.0
 
         top_friction = await _cluster_friction(results, "friction_points", "FRICTION POINTS")
         worked_themes = await _cluster_friction(results, "what_worked", "WHAT WORKED")
