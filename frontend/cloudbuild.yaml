@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - --build-arg
+      - NEXT_PUBLIC_API_URL=https://veratest-backend-169174549586.us-central1.run.app
+      - -t
+      - gcr.io/$PROJECT_ID/veratest-frontend:latest
+      - .
+images:
+  - gcr.io/$PROJECT_ID/veratest-frontend:latest
