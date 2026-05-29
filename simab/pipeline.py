@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import state
+from . import ratelimit, state
 from .agents import auditor, narrative, normalizer, scenarios, simulator, synthesizer
 from .config import CONFIG
 
@@ -57,6 +57,8 @@ async def run_pipeline(run_id: str) -> None:
         log.exception(f"[{run_id}] pipeline failed: {e}")
         await state.set_status(run_id, "failed", error=str(e))
         raise
+    finally:
+        ratelimit.notify_run_finished()
 
 
 async def _notify_completion(run_id: str) -> None:

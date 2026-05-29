@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] — 2026-05-29
 ### Added
+- Rate-limiting middleware (`simab/ratelimit.py`) for the live demo: global daily run cap, per-IP hourly cap, pending-queue depth limit, upload-size limit, and optional access code. Configured via env vars (`SIMAB_DAILY_RUN_CAP`, `SIMAB_PER_IP_HOUR_CAP`, `SIMAB_MAX_PENDING`, `SIMAB_MAX_UPLOAD_MB`, `SIMAB_ACCESS_CODE`).
 - Single-screen evaluation mode: `variant_b` is now optional. Upload one design to get resonance scoring, friction themes, and recommendations without an A/B comparison.
 - Pixelated walking agent characters in the Packman loading theater (replaces Pac-Man circles). Each agent's jacket color matches its persona segment color.
 - `PersonaCarousel` component — prev/next navigation through all persona diagnostics.
