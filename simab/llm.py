@@ -111,8 +111,8 @@ def _strip_json_fences(text: str) -> str:
 
 @retry(
     retry=retry_if_exception_type(Exception),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2, max=20),
+    stop=stop_after_attempt(6),
+    wait=wait_exponential(multiplier=2, min=5, max=60),
     reraise=True,
 )
 async def generate(
