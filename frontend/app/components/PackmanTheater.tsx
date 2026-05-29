@@ -122,11 +122,15 @@ export default function PackmanTheater({
   const agentsRef = useRef<Agent[]>([]);
   const eatenDotsRef = useRef<Set<number>>(new Set());
 
-  // Keep runRef current and initialise agents once when scenarios arrive
+  // Keep runRef current; re-initialize agents when real scenarios arrive (replacing placeholders)
   useEffect(() => {
     runRef.current = run;
 
-    if (agentsRef.current.length === 0 && run?.scenarios?.length > 0) {
+    const hasPlaceholders = agentsRef.current.length > 0 && agentsRef.current[0].id < 0;
+    const hasScenarios = (run?.scenarios?.length ?? 0) > 0;
+
+    if (hasScenarios && (agentsRef.current.length === 0 || hasPlaceholders)) {
+      // Real agents from scenarios data
       const scenarios: any[] = run.scenarios;
       const segments: string[] = Array.from(new Set(scenarios.map((s) => s.segment as string)));
       const agentsPerSeg: Record<string, number> = {};
@@ -145,6 +149,23 @@ export default function PackmanTheater({
         jumpFrame: 0,
         speed: 1.5,
         totalAgents: agentsPerSeg[segment] || 0,
+        exited: false,
+      }));
+    } else if (agentsRef.current.length === 0) {
+      // Placeholder agents so the theater isn't empty during normalizing/building_scenarios
+      const N = 5;
+      agentsRef.current = Array.from({ length: N }, (_, i) => ({
+        id: -(i + 1),
+        segment: `agent_${i}`,
+        x: -20 - i * 15,
+        y: 90 + (i - (N - 1) / 2) * 14,
+        baseY: 90 + (i - (N - 1) / 2) * 14,
+        color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
+        state: "moving" as const,
+        pauseFrames: 0,
+        jumpFrame: 0,
+        speed: 1.5,
+        totalAgents: N,
         exited: false,
       }));
     }
@@ -260,8 +281,9 @@ export default function PackmanTheater({
       ctx.fillRect(0, 0, 640, 180);
 
       if (countRef.current) {
-        const total = Math.max(agents.length, 1);
-        countRef.current.innerText = `${exitedCount} / ${total}`;
+        const totalAgents = currentRun?.scenarios?.length ?? agents.length;
+        const completedAgents = simResults.length;
+        countRef.current.innerText = `${completedAgents} / ${Math.max(totalAgents, 1)}`;
       }
 
       if (agents.length > 0 && exitedCount === agents.length) {

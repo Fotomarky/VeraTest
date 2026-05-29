@@ -6,9 +6,14 @@
 
 ## Project in one sentence
 
-SimAB is a synthetic UX pretest engine: upload two landing-page screenshots + a conversion goal, and 20 AI agents (each embodying a distinct audience persona) simulate how real users would respond — returning a weighted winner, friction themes, trust signals, and a PM-ready report.
+SimAB is a synthetic UX pretest engine: upload one or two landing-page screenshots + a conversion goal, and 20 AI agents (each embodying a distinct audience persona) simulate how real users would respond — returning resonance scores, friction themes, trust signals, and a PM-ready report. Upload one design for single-screen friction analysis; upload two for A/B directional comparison.
 
 Built for the **Google Cloud Rapid Agent Hackathon — Arize Track**.
+
+**Live deployment (Google Cloud Run):**
+- Frontend: `https://veratest-frontend-169174549586.us-central1.run.app`
+- Backend:  `https://veratest-backend-169174549586.us-central1.run.app`
+- Project:  `veratest-497813` (us-central1)
 
 ---
 
@@ -17,7 +22,7 @@ Built for the **Google Cloud Rapid Agent Hackathon — Arize Track**.
 ```
 simab/                  Backend Python package (FastAPI)
   main.py               API surface (REST + SSE + A2A endpoints)
-  pipeline.py           Orchestrator — runs the 5 phases in sequence
+  pipeline.py           Orchestrator — runs the 6 phases in sequence
   models.py             ALL Pydantic schemas (single source of truth)
   state.py              SQLite persistence layer (async, WAL mode)
   llm.py                Gemini wrapper — rate limiting, retries, JSON parsing
@@ -28,7 +33,8 @@ simab/                  Backend Python package (FastAPI)
     scenarios.py        Phase 2: Brief → 3-7 ScenarioCards + allocations
     simulator.py        Phase 3: one ScenarioCard → SimResult (runs 20 in parallel)
     auditor.py          Phase 4: all SimResults → AuditReport (bias checks)
-    synthesizer.py      Phase 5: SimResults + AuditReport → Synthesis
+    synthesizer.py      Phase 5: SimResults + AuditReport → Synthesis (sets status=synthesizing)
+    narrative.py        Phase 6: 3 parallel sub-agents → structural_diff, hypothesis, cohort_narrative (sets status=complete)
   integrations/
     slack.py            Optional: post completion to Slack webhook
 
@@ -63,19 +69,22 @@ docs/                   Architecture diagrams and extended reference
 **The key design invariant.** Every agent reads from and writes to the shared `Run` document in SQLite. No agent receives parameters from another agent directly. Agents coordinate by leaving structured outputs that downstream agents consume — like ant pheromones.
 
 ```
-Upload → BriefNormalizer → ScenarioBuilder → 20 × Simulator → BiasAuditor → Synthesizer
-           writes brief      writes scenarios   writes SimResults  writes audit   writes synthesis
+Upload → BriefNormalizer → ScenarioBuilder → 20 × Simulator → BiasAuditor → Synthesizer → NarrativeAgents (×3)
+           writes brief      writes scenarios   writes SimResults  writes audit   writes synthesis  writes narrative, sets complete
 ```
 
 Each agent only writes its own slice:
 
 | Agent | Reads | Writes |
 |---|---|---|
-| `normalizer` | `goal`, `audience_raw`, images | `run.brief`, `run.scenarios` (inferred_personas) |
+| `normalizer` | `goal`, `audience_raw`, images (1 or 2) | `run.brief`, `run.scenarios` (inferred_personas) |
 | `scenarios` | `run.brief` | `run.scenarios` (final), `run.agent_allocations` |
 | `simulator` | `run.scenarios[i]`, images | `run.simulation_results[i]` (idempotent upsert) |
 | `auditor` | `run.simulation_results` | `run.audit` |
-| `synthesizer` | `run.simulation_results`, `run.audit` | `run.synthesis`, sets status=complete |
+| `synthesizer` | `run.simulation_results`, `run.audit` | `run.synthesis`, sets status=**synthesizing** |
+| `narrative` (×3) | `run.synthesis`, images | `run.synthesis.{structural_diff,hypothesis_pros/cons,narrative}`, sets status=**complete** |
+
+**Single-screen mode:** when `variant_b_path` is absent (`None` / `""`), the pipeline skips cohort splitting. All 20 sim agents evaluate `variant_a`; `directional_winner` is forced to `"tie"`; the auditor skips cohort imbalance checks; the synthesizer uses `SINGLE_SCREEN_SUMMARY_PROMPT`.
 
 **The open/closed rule:** each agent is open to extension (new fields, new heuristics) but closed to upstream changes. An agent must never modify another agent's slice of state.
 
@@ -87,12 +96,25 @@ Each agent only writes its own slice:
 
 - `ScenarioCard` — one persona profile (segment, intent, decision_style, device, traffic_weight, etc.)
 - `Brief` — normalizer output (variant summaries, key_differences, inferred_personas)
-- `SimResult` — one simulator's verdict (includes Fogg model, trust signals, visual impact)
-- `AuditReport` — bias checks (order_bias, confidence_collapse, coherence)
-- `Synthesis` — final output (winner, weighted_vote, top_friction, fogg_avg, trust_signal_gaps)
-- `Run` — the full shared document containing all of the above
+- `SimResult` — one agent's evaluation of **one cohort**. Key v0.3 fields:
+  - `cohort: "variant_a" | "variant_b"` — which variant was evaluated
+  - `resonance: dict[str, int]` — per-dimension 1-10 scores (motivation, identity, situation, beliefs, ability, trigger)
+  - `resonance_overall: float` — weighted mean of resonance dims
+  - `intent_signal: "would_act" | "would_research" | "would_leave"`
+  - `metacognitive_reflection`, `trust_signals_found`, `trust_signals_missing`, `friction_points`, `what_worked`
+  - **Removed in v0.3:** `verdict`, `outcome`, `visual_impact`, `attention_path`, `fogg_motivation`, `fogg_ability`
+- `AuditReport` — bias checks (confidence_collapse, cohort_balance, per_dim_variance, inflation_warning)
+- `Synthesis` — final output. Key v0.3 fields:
+  - `directional_winner: "variant_a" | "variant_b" | "tie"` (not `winner`)
+  - `cohort_resonance_overall: dict[str, float]` — e.g. `{variant_a: 5.8, variant_b: 7.2}` (not `weighted_vote`)
+  - `cohort_resonance: dict[str, dict[str, float]]` — per-dim per-cohort breakdown
+  - `top_friction`, `what_worked_themes`, `coverage_score`, `recommendation`, `confound_warning`, `trust_signal_gaps`
+  - **Removed in v0.3:** `winner`, `weighted_vote`, `fogg_avg`, `visual_impact`
+- `Run` — the full shared document containing all of the above. Key field: `variant_b_path: Optional[str] = None` — `None` or `""` signals single-screen mode throughout the pipeline.
 
 **Never add fields to these models without updating the tests.**
+
+**SQLite sentinel:** `variant_b_path` is stored as `""` (empty string) in SQLite when absent (SQLite has no native `None`). Read it back with `data["variant_b_path"] or None`. Never store `None` directly.
 
 ---
 
@@ -104,7 +126,7 @@ Each agent only writes its own slice:
 |---|---|---|
 | `gemini-2.5-flash-lite` | 20 sim agents | Free tier: 30 RPM, 1500 RPD |
 | `gemini-2.5-flash` | normalizer + scenario builder | Free tier: 15 RPM, 500 RPD |
-| `gemini-2.5-pro` | auditor + synthesizer | Free tier: 5 RPM, 50 RPD |
+| `gemini-2.5-flash` | auditor + synthesizer + narrative | Free tier: 15 RPM, 500 RPD |
 
 Rate limiting is per-model token buckets in `llm.py`. **Never call `llm.generate()` directly from outside the agents** — rate limiting and retries are baked in.
 
@@ -156,7 +178,13 @@ cd frontend && npm install && npm run dev
 ### End-to-end test
 
 ```bash
-# Submit a run
+# Single-screen run (variant_b omitted)
+curl -X POST http://localhost:8000/api/runs \
+  -F "variant_a=@tests/fixtures/variant_a.png" \
+  -F "goal=sign up for free trial" \
+  -F "audience=Startup founders evaluating CI tools"
+
+# A/B run
 curl -X POST http://localhost:8000/api/runs \
   -F "variant_a=@tests/fixtures/variant_a.png" \
   -F "variant_b=@tests/fixtures/variant_b.png" \
@@ -219,6 +247,33 @@ Health
 
 ---
 
+## Frontend components (results page — PM Command Center)
+
+`frontend/app/runs/[id]/page.tsx` renders the results as a single-column Command Center. Component render order:
+
+| Component | Purpose | Single-screen behaviour |
+|---|---|---|
+| `CommandRail` | Sticky verdict rail — validity badge (left), resonance bar (center), coverage + export actions (right) | Center shows single resonance bar (X.X/10) instead of A/B tug-of-war |
+| `ArcadeTheater` | Pixelated walking agent animation while run is in-flight | Same |
+| `SprintPriorities` | Top 3 numbered friction items as actionable sprint tasks | Same |
+| `BlockersMatrix` | Unified friction + what-worked table with Fogg badges (Motiv↑/↓, Ability↑/↓) and recommended-fix hints from `metacognitive_reflection` | Same |
+| `PersonaCarousel` | Carousel of `PersonaCard` components, sorted by agent count; prev/next arrows + dot indicators | Passes `isSingleScreen` to each card |
+| `UserStoryScaffold` | "As a … I need … so that …" cards from HIGH/MED friction, copy-to-clipboard | Same |
+| `TestNextHypothesis` | Blue card with `synthesis.recommendation` quote + projected ability score target | Same |
+| `VisualEvidence` | Collapsible variant image reference (collapsed by default when confounded) | Shows only variant A in a narrow single-column grid |
+
+**`isSingleScreen`** is set on `page.tsx` as `!run.variant_b_path`. Pass this prop to `PersonaCarousel` and `VisualEvidence`.
+
+**`CommandRail` single-screen detection:** `isSingleScreen = isComplete && scoreA > 0 && scoreB === 0` (compute AFTER `isComplete` is defined).
+
+**`computeFoggAvg(results)`** in `page.tsx` derives per-cohort resonance averages from `SimResult.resonance` — there is no `fogg_avg` on the backend `Synthesis` model. Pass the result to `BlockersMatrix` and `TestNextHypothesis`.
+
+**CommandRail balance bar (A/B only):** converts `cohort_resonance_overall` raw scores (e.g. 5.8 vs 7.2) into relative percentages (`scoreA / (scoreA + scoreB)`), not vote counts.
+
+**PersonaCard vote bar:** hidden when `isSingleScreen`; otherwise shows resonance proportion (avg `resonance_overall` for variant_a cohort vs variant_b cohort).
+
+---
+
 ## Key design decisions to preserve
 
 - **No agent frameworks** (no LangGraph, no CrewAI). All coordination is through SQLite state. This is intentional — it makes the system debuggable without framework abstractions.
@@ -234,7 +289,7 @@ Health
 Competition: **Google Cloud Rapid Agent Hackathon — Arize Track**
 
 Track requirements:
-- Multi-agent system (✅ 5 agents + 20 parallel sims)
+- Multi-agent system (✅ 6 phases + 20 parallel sims)
 - Arize Phoenix observability integration (✅ OTLP via `PHOENIX_COLLECTOR_ENDPOINT`)
 - Open source with detectable license (✅ MIT)
 - Live demo URL required
@@ -266,4 +321,20 @@ git grep -i "AIza\|sk-\|secret_\|password" -- '*.py' '*.ts' '*.json'
 **Frontend type-check:**
 ```bash
 cd frontend && npx tsc --noEmit
+```
+
+**Re-deploy to Cloud Run after changes:**
+```bash
+# Backend only
+gcloud builds submit --tag gcr.io/veratest-497813/veratest-backend:latest --project veratest-497813
+gcloud run deploy veratest-backend --image gcr.io/veratest-497813/veratest-backend:latest \
+  --region us-central1 --project veratest-497813
+
+# Frontend only
+gcloud builds submit frontend --config frontend/cloudbuild.yaml --project veratest-497813
+gcloud run deploy veratest-frontend --image gcr.io/veratest-497813/veratest-frontend:latest \
+  --region us-central1 --project veratest-497813
+
+# Both at once
+./gcp/deploy.sh veratest-497813
 ```
