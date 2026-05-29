@@ -162,7 +162,7 @@ export GEMINI_API_KEY="your-key-here"
 
 # Smoke test (no API needed)
 pytest tests/ -v
-# Expected: 32 passed
+# Expected: 31 passed
 
 # Generate sample fixtures
 python tests/fixtures/make_samples.py
@@ -218,7 +218,7 @@ cd mcp && pip install -e .
 2. Insert the new phase into `pipeline.py` — update `run_pipeline()` and set the status string via `state.set_status()`
 3. Add any new output fields to the relevant model in `models.py`
 4. Add tests in `tests/`
-5. Run `pytest tests/ -v` — all 32 must pass
+5. Run `pytest tests/ -v` — all 31 must pass
 
 ---
 

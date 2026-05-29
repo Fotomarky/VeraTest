@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" />
   <img src="https://img.shields.io/badge/Arize-Phoenix%20Observability-7C3AED?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Gemini-Flash%20%7C%20Flash--Lite-4285F4?style=for-the-badge&logo=google&logoColor=white" />
-  <img src="https://img.shields.io/badge/Tests-32%20passing-22C55E?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Tests-31%20passing-22C55E?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge" />
   <img src="https://img.shields.io/badge/MCP-native-0EA5E9?style=for-the-badge" />
 </p>
@@ -132,7 +132,7 @@ export GEMINI_API_KEY="your-key-here"
 
 # Smoke tests (no API calls needed)
 pytest tests/ -v
-# Expected: 32 passed
+# Expected: 31 passed
 
 uvicorn simab.main:app --reload --port 8000
 
@@ -284,7 +284,7 @@ Ask Claude: *"Run a pretest on these two screenshots for trial signups from star
 
 ```bash
 pytest tests/ -v
-# 32 passed in ~1s
+# 31 passed in ~1s
 ```
 
 Covers: idempotent state writes under concurrent agents, schema compatibility, traffic-weighted allocator, resonance aggregation, trust gap ranking, markdown export, share-page self-containment.

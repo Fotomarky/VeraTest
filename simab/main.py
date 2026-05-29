@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from sse_starlette.sse import EventSourceResponse
 
-from . import exports, state
+from . import exports, ratelimit, state
 from .config import CONFIG
 from .models import AudiencePreset, CreateRunResponse
 from .pipeline import run_pipeline
@@ -56,6 +56,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ratelimit.RateLimitMiddleware)
 
 
 # ---------------------------------------------------------------------------
