@@ -53,7 +53,11 @@ def init_phoenix() -> bool:
         tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
         _initialized = True
-        log.info(f"Phoenix tracing enabled — UI at http://localhost:6006")
+        ui_hint = CONFIG.phoenix_endpoint or "http://localhost:6006"
+        log.info(
+            f"Phoenix tracing enabled — exporting to {CONFIG.phoenix_endpoint} "
+            f"(project={CONFIG.phoenix_project}). UI: {ui_hint}"
+        )
         return True
     except ImportError:
         log.warning(
