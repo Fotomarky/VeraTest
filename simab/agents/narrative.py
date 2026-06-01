@@ -121,10 +121,15 @@ Respond with the narrative text directly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def structural_diff(run_id: str) -> list[str]:
-    """Factual differences only. No winner judgment."""
+    """Factual differences only. No winner judgment.
+
+    Single-screen runs have nothing to diff against — return [] cleanly
+    instead of crashing on Path(None)."""
     run = await state.get_run(run_id)
     if run is None:
         raise ValueError(f"Run {run_id} not found")
+    if not run.variant_b_path:
+        return []
     img_a = Path(run.variant_a_path).read_bytes()
     img_b = Path(run.variant_b_path).read_bytes()
     raw = await generate(
@@ -145,6 +150,10 @@ async def symmetric_hypothesis(
     run = await state.get_run(run_id)
     if run is None:
         raise ValueError(f"Run {run_id} not found")
+    if not run.variant_b_path:
+        # Single-screen: no symmetric hypothesis possible. Return empty dicts.
+        empty: dict[str, list[str]] = {"variant_a": [], "variant_b": []}
+        return empty, empty
     img_a = Path(run.variant_a_path).read_bytes()
     img_b = Path(run.variant_b_path).read_bytes()
     raw = await generate(
