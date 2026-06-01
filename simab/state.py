@@ -19,7 +19,8 @@ import aiosqlite
 
 from . import config as _config_module
 from .models import (
-    AudiencePreset, Run, Brief, ScenarioCard, SimResult, AuditReport, Synthesis, RunStatus
+    AudiencePreset, Run, Brief, ScenarioCard, SimResult, AuditReport,
+    Synthesis, FidelityReport, RunStatus,
 )
 
 
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS runs (
     agent_allocations_json TEXT NOT NULL DEFAULT '[]',
     audit_json TEXT,
     synthesis_json TEXT,
+    fidelity_json TEXT,
     error TEXT
 );
 
@@ -84,6 +86,15 @@ async def get_db() -> aiosqlite.Connection:
                 await _db.execute("PRAGMA foreign_keys=ON")
                 await _db.executescript(SCHEMA)
                 await _db.commit()
+                # Idempotent migration for pre-existing DBs created before
+                # the calibration-layer fidelity_json column was added.
+                try:
+                    await _db.execute(
+                        "ALTER TABLE runs ADD COLUMN fidelity_json TEXT"
+                    )
+                    await _db.commit()
+                except aiosqlite.OperationalError:
+                    pass  # column already exists
     return _db
 
 
@@ -161,6 +172,7 @@ async def get_run(run_id: str) -> Optional[Run]:
         simulation_results=[SimResult.model_validate_json(r[0]) for r in sim_rows],
         audit=AuditReport.model_validate_json(data["audit_json"]) if data["audit_json"] else None,
         synthesis=Synthesis.model_validate_json(data["synthesis_json"]) if data["synthesis_json"] else None,
+        fidelity=FidelityReport.model_validate_json(data["fidelity_json"]) if data.get("fidelity_json") else None,
         error=data["error"],
     )
 
@@ -277,6 +289,24 @@ async def write_synthesis(run_id: str, synthesis: Synthesis) -> None:
             synthesis.model_dump_json(),
             "complete",
             "synthesis",
+            datetime.now(timezone.utc).isoformat(),
+            run_id,
+        ),
+    )
+    await db.commit()
+
+
+async def write_fidelity(run_id: str, fidelity: FidelityReport) -> None:
+    """Persist the FidelityReport slice (Phase 7). Does NOT touch status —
+    the caller decides whether to advance the run to 'complete'."""
+    db = await get_db()
+    await db.execute(
+        """UPDATE runs SET fidelity_json=?,
+           phases_complete=json_insert(phases_complete, '$[#]', ?),
+           updated_at=? WHERE run_id=?""",
+        (
+            fidelity.model_dump_json(),
+            "fidelity",
             datetime.now(timezone.utc).isoformat(),
             run_id,
         ),
