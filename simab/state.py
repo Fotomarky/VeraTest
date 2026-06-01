@@ -280,14 +280,16 @@ async def write_audit(run_id: str, audit: AuditReport) -> None:
 
 
 async def write_synthesis(run_id: str, synthesis: Synthesis) -> None:
+    """Persist the Synthesis slice. Status is NOT touched — the caller
+    (synthesizer for the first write, narrative for the second) owns its
+    own status transition via set_status(). Fidelity owns 'complete'."""
     db = await get_db()
     await db.execute(
-        """UPDATE runs SET synthesis_json=?, status=?,
+        """UPDATE runs SET synthesis_json=?,
            phases_complete=json_insert(phases_complete, '$[#]', ?),
            updated_at=? WHERE run_id=?""",
         (
             synthesis.model_dump_json(),
-            "complete",
             "synthesis",
             datetime.now(timezone.utc).isoformat(),
             run_id,
