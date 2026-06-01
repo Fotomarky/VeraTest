@@ -131,6 +131,9 @@ class SimResult(BaseModel):
     metacognitive_reflection: str = ""  # agent's self-correction
     model: str = "gemini-3-flash-preview"
     latency_ms: int = 0
+    span_id: Optional[str] = None
+    # Phoenix span id (16-hex) captured at trace time so the FidelityAuditor
+    # can attach Span Evaluations back to the exact agent invocation.
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +222,25 @@ class Synthesis(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Fidelity — Phase 7 calibration output (Arize-track)
+# ---------------------------------------------------------------------------
+
+class FidelityReport(BaseModel):
+    """How faithfully agents simulated their personas in this run.
+
+    `persona_consistency` is the LLM-as-a-Judge signal; `rationale_coherence`
+    is the deterministic code-based signal. Two independent eval columns let
+    Phoenix triangulate without a single LLM hallucination dominating.
+    """
+    persona_consistency: float = Field(ge=0.0, le=1.0)
+    agents_drifted: int = 0
+    rationale_coherence: float = Field(default=1.0, ge=0.0, le=1.0)
+    agents_incoherent: int = 0
+    eval_explanations: list[str] = Field(default_factory=list)
+    drifted_agent_indices: list[int] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Run document — the stigmergy shared state
 # ---------------------------------------------------------------------------
 
@@ -229,6 +251,8 @@ RunStatus = Literal[
     "simulating",
     "auditing",
     "synthesizing",
+    "narrating",
+    "calibrating",
     "complete",
     "failed",
 ]
@@ -257,6 +281,7 @@ class Run(BaseModel):
     simulation_results: list[SimResult] = Field(default_factory=list)
     audit: Optional[AuditReport] = None
     synthesis: Optional[Synthesis] = None
+    fidelity: Optional[FidelityReport] = None
 
     error: Optional[str] = None
 

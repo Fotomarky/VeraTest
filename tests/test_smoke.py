@@ -161,3 +161,49 @@ async def test_persona_library_save_and_list():
     assert any(p.id == "sc_persona_1" for p in personas)
     tagged = await state.list_personas(tag="saas")
     assert any(p.id == "sc_persona_1" for p in tagged)
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — calibration layer model additions
+# ---------------------------------------------------------------------------
+
+def test_fidelity_report_model_roundtrips():
+    from simab.models import FidelityReport
+
+    fr = FidelityReport(
+        persona_consistency=0.95,
+        agents_drifted=1,
+        rationale_coherence=0.90,
+        agents_incoherent=2,
+        eval_explanations=["agent_3 used 'as an AI' phrasing"],
+        drifted_agent_indices=[3],
+    )
+    assert fr.persona_consistency == 0.95
+    reloaded = FidelityReport.model_validate_json(fr.model_dump_json())
+    assert reloaded.agents_drifted == 1
+    assert reloaded.drifted_agent_indices == [3]
+
+
+def test_simresult_has_optional_span_id():
+    sr = SimResult(
+        scenario_id="sc_1", scenario_segment="x",
+        agent_idx=0, cohort="variant_a",
+    )
+    assert sr.span_id is None
+    sr2 = sr.model_copy(update={"span_id": "abc123"})
+    assert sr2.span_id == "abc123"
+
+
+def test_run_has_optional_fidelity_slice():
+    from simab.models import Run
+    run = Run(run_id="r1", goal="g", variant_a_path="/x.png")
+    assert run.fidelity is None
+
+
+def test_run_status_includes_narrating_and_calibrating():
+    # Pydantic Literal values — round-trip via model_validate on the Run model.
+    from simab.models import Run
+    for status in ("narrating", "calibrating"):
+        run = Run(run_id=f"r_{status}", goal="g",
+                  variant_a_path="/x.png", status=status)
+        assert run.status == status
