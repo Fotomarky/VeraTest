@@ -66,8 +66,6 @@ async def test_fidelity_computes_persona_consistency_and_coherence(
     ])
     with patch("simab.agents.fidelity.llm_classify",
                return_value=fake_results) as mock_classify, \
-         patch("simab.agents.fidelity._gemini_model",
-               return_value=None) as _mock_model, \
          patch("simab.agents.fidelity.log_span_evaluations") as mock_log, \
          patch("simab.agents.fidelity.append_drifted_agents") as mock_append:
         await _fidelity_mod.run(rid)
