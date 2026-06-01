@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "veratest": {
+      "command": "python",
+      "args": ["-m", "simab_mcp"],
+      "env": { "SIMAB_API_URL": "http://localhost:8000" }
+    },
+    "phoenix": {
+      "command": "npx",
+      "args": ["-y", "@arizeai/phoenix-mcp@latest"],
+      "env": {
+        "PHOENIX_BASE_URL": "http://localhost:6006",
+        "PHOENIX_API_KEY":  ""
+      }
+    }
+  }
+}

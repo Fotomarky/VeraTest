@@ -189,6 +189,20 @@ export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
 
 Every run produces ~24 spans in Phoenix — one per Gemini call. Full prompts, image payloads, responses, and timing. You can see exactly what the Study Designer extracted, what each Cognitive Walker decided and why, what the Bias Auditor flagged. No black box.
 
+### Cross-run calibration — agents that improve
+
+A 7th agent — **FidelityAuditor** — runs an LLM-as-a-Judge persona-
+consistency eval plus a code-based rationale-coherence check on every run.
+Drifted agents are written to a persistent Phoenix Dataset; on the next
+run targeting a similar audience, ScenarioBuilder queries that history and
+strengthens the prompt of any persona archetype that has drifted >25% of
+the time. The Command Center surfaces this as a "95% in character" badge —
+the answer to "how do I trust this?"
+
+See [scripts/run_calibration_experiment.py](scripts/run_calibration_experiment.py)
+for the baseline-vs-tightened Phoenix Experiment that produces the
+visible before/after fidelity delta.
+
 ---
 
 ## Quick start — 5 minutes
@@ -268,7 +282,14 @@ frontend/
         └── VisualEvidence.tsx     Collapsible variant image reference
 ```
 
-**No LangChain. No LangGraph. No framework.** Pure Python async + stigmergy via shared SQLite. Agents coordinate through data, not function calls — making every run fully debuggable.
+**Why no agent framework?** VeraTest deliberately uses none. The pipeline
+coordinates through a single shared SQLite document — every agent reads
+from and writes to one structured record — so each run is fully
+inspectable, every decision is debuggable, and there's no framework
+abstraction between you and the agent behavior. This is exactly the
+transparency Phoenix tracing is designed for: every Gemini call is a
+direct OpenInference span, with no framework intermediation to obscure
+what the agent saw and decided.
 
 ---
 
@@ -348,6 +369,24 @@ pip install -e mcp/
 | `get_pretest_result` | Poll or block until complete, returns full synthesis |
 | `list_runs` | Recent runs with status and verdict |
 | `list_personas` | Browse the persona library |
+
+### Phoenix MCP — runtime introspection of your own traces
+
+The Arize track requires agents to introspect their operational data at
+runtime via the Phoenix MCP server. Drop this into any MCP client config —
+Claude Desktop, Gemini CLI, Cursor — alongside the VeraTest MCP server:
+
+```bash
+cp mcp/phoenix-mcp.example.json ~/Library/Application\ Support/Claude/claude_desktop_config.json
+```
+
+Then ask Claude (or Gemini CLI):
+
+> *"Which personas drifted in the last 5 VeraTest runs, and what was their
+> average rationale coherence?"*
+
+The Phoenix MCP server exposes Datasets, Experiments, Prompts, and Spans
+as MCP tools — so your assistant can query them directly, no SQL required.
 
 Ask Claude: *"Run a pretest on these two screenshots for trial signups from startup founders."*
 
