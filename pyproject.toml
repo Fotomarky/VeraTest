@@ -26,7 +26,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-phoenix = ["arize-phoenix>=4.0", "arize-phoenix-otel>=0.5", "openinference-instrumentation>=0.1"]
+phoenix = [
+    "arize-phoenix>=4.0",
+    "arize-phoenix-otel>=0.5",
+    "arize-phoenix-evals>=0.13",
+    "arize-phoenix-client>=1.0",
+    "openinference-instrumentation>=0.1",
+    "openinference-instrumentation-google-genai>=0.1",
+]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "anyio>=4.0"]
 
 [tool.setuptools.packages.find]
