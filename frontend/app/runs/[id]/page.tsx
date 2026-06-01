@@ -147,6 +147,33 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     let cancelled = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+    const stopPolling = () => {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const startPolling = () => {
+      if (pollTimer !== null) return;
+      pollTimer = setInterval(async () => {
+        if (cancelled) return;
+        try {
+          const res = await fetch(`/api/runs/${params.id}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          if (cancelled) return;
+          setRun(data);
+          if (data.status === "complete" || data.status === "failed") {
+            stopPolling();
+          }
+        } catch {}
+      }, 2000);
+    };
+
+    // Initial fetch
     fetch(`/api/runs/${params.id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -160,16 +187,18 @@ export default function RunPage({ params }: { params: { id: string } }) {
         setRun(JSON.parse(e.data));
       } catch {}
     });
+    // When SSE drops (Cloud Run idle close, network blip, etc.), close the
+    // dead source and fall back to polling so we always reach the terminal
+    // state instead of silently freezing on the last seen status.
     source.onerror = () => {
-      fetch(`/api/runs/${params.id}`)
-        .then((r) => r.json())
-        .then(setRun)
-        .catch(() => {});
       source.close();
+      startPolling();
     };
+
     return () => {
       cancelled = true;
       source.close();
+      stopPolling();
     };
   }, [params.id]);
 
