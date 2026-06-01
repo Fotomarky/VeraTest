@@ -39,14 +39,15 @@ def init_phoenix() -> bool:
         from phoenix.otel import register
         from openinference.instrumentation.google_genai import GoogleGenAIInstrumentor
 
-        # Phoenix Cloud uses OTLP-over-HTTP at <endpoint>/v1/traces — force
-        # protocol='http/protobuf' so the SDK doesn't fall back to gRPC
-        # (which Phoenix Cloud doesn't accept) or guess wrong from the URL.
-        # Pass api_key directly (clean Bearer construction is built in) and
-        # batch=True to silence the SimpleSpanProcessor production warning.
+        # Phoenix Cloud needs OTLP HTTP/protobuf, and the URL must include
+        # the space-scoped /v1/traces suffix (e.g. /s/<space>/v1/traces).
+        # phoenix.otel.register() applies that suffix via its _KNOWN_PROVIDERS
+        # normalizer ONLY when the endpoint comes from PHOENIX_COLLECTOR_ENDPOINT
+        # — passing endpoint= explicitly bypasses normalization and the
+        # exporter ends up POSTing to the dashboard URL (405 Method Not
+        # Allowed). So we rely on the env var instead of passing endpoint=.
         register_kwargs = dict(
             project_name=CONFIG.phoenix_project,
-            endpoint=CONFIG.phoenix_endpoint,
             protocol="http/protobuf",
             batch=True,
             auto_instrument=False,
