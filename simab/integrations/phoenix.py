@@ -39,17 +39,20 @@ def init_phoenix() -> bool:
         from phoenix.otel import register
         from openinference.instrumentation.google_genai import GoogleGenAIInstrumentor
 
+        # Phoenix Cloud uses OTLP-over-HTTP at <endpoint>/v1/traces — force
+        # protocol='http/protobuf' so the SDK doesn't fall back to gRPC
+        # (which Phoenix Cloud doesn't accept) or guess wrong from the URL.
+        # Pass api_key directly (clean Bearer construction is built in) and
+        # batch=True to silence the SimpleSpanProcessor production warning.
         register_kwargs = dict(
             project_name=CONFIG.phoenix_project,
             endpoint=CONFIG.phoenix_endpoint,
+            protocol="http/protobuf",
+            batch=True,
             auto_instrument=False,
         )
         if CONFIG.phoenix_api_key:
-            # Phoenix Cloud authenticates via standard OTLP Bearer header,
-            # not a custom `api_key` field.
-            register_kwargs["headers"] = {
-                "authorization": f"Bearer {CONFIG.phoenix_api_key}",
-            }
+            register_kwargs["api_key"] = CONFIG.phoenix_api_key
         tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
         _initialized = True
