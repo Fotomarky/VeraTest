@@ -222,6 +222,7 @@ async def run(run_id: str) -> None:
     log_span_evaluations(
         eval_name="rationale_coherence",
         df=pd.DataFrame(coh_rows),
+        annotator_kind="CODE",  # deterministic rule, not an LLM
     )
 
     # ── 4. Append drifted rows to the cross-run Phoenix Dataset ──────────

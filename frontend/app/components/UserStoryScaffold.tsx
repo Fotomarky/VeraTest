@@ -22,17 +22,60 @@ type Props = {
   resultsBySegment: Map<string, SimResult[]>;
 };
 
-function themeToNeed(theme: string): string {
-  const lower = theme.toLowerCase();
-  if (/\bmissing\b/.test(lower) || /\black of\b/.test(lower)) {
-    const stripped = theme.replace(/^(missing|lack of)\s*/i, "").trim();
-    return stripped || theme;
+// Map negative friction adjectives to their positive "need" equivalents.
+// Keys are the bad phrase; values are what to prepend (or "" to just strip).
+// Order matters — longer phrases first so "lack of" beats "lack".
+const NEGATIVE_TO_NEED: Array<[RegExp, string]> = [
+  [/\black of\b/gi,        ""],
+  [/\babsence of\b/gi,     ""],
+  [/\bmissing\b/gi,        ""],
+  [/\babsent\b/gi,         ""],
+  [/\bno\b/gi,             ""],
+  [/\binadequate\b/gi,     "stronger"],
+  [/\binsufficient\b/gi,   "more complete"],
+  [/\bpoor\b/gi,           "stronger"],
+  [/\bweak\b/gi,           "stronger"],
+  [/\blimited\b/gi,        "more comprehensive"],
+  [/\bincomplete\b/gi,     "complete"],
+  [/\bpartial\b/gi,        "complete"],
+  [/\bsparse\b/gi,         "comprehensive"],
+  [/\bunclear\b/gi,        "clearer"],
+  [/\bvague\b/gi,          "clearer"],
+  [/\bconfusing\b/gi,      "clearer"],
+  [/\bcomplicated\b/gi,    "simpler"],
+  [/\boverwhelming\b/gi,   "simpler"],
+  [/\bhidden\b/gi,         "more visible"],
+  [/\bburied\b/gi,         "more visible"],
+  [/\bobscured\b/gi,       "more visible"],
+  [/\birrelevant\b/gi,     "more targeted"],
+  [/\bgeneric\b/gi,        "more specific"],
+];
+
+// Convert a friction theme (a PROBLEM) into a need-phrase (a SOLUTION) so
+// the user story "I need X" reads naturally. A friction theme like
+// "Inadequate Feature Comparison & Detail" should yield "stronger feature
+// comparison & detail", not the literal friction phrase.
+export function themeToNeed(theme: string): string {
+  let cleaned = theme;
+  let prepend: string | null = null;
+  for (const [pattern, replacement] of NEGATIVE_TO_NEED) {
+    if (pattern.test(cleaned)) {
+      // Capture the first positive replacement found (don't double-prepend).
+      if (replacement && !prepend) prepend = replacement;
+      // Reset lastIndex for the global regex before replacing.
+      cleaned = cleaned.replace(pattern, "").trim();
+    }
   }
-  if (/\bvague\b/.test(lower) || /\bunclear\b/.test(lower)) {
-    const stripped = theme.replace(/^(vague|unclear)\s*/i, "").trim();
-    return stripped ? "a clearer " + stripped : theme;
-  }
-  return theme;
+  // Remove leading conjunctions / punctuation left behind by stripping
+  // ("& Irrelevant Foo" → "& Foo" → "Foo").
+  cleaned = cleaned.replace(/^[\s&,]+|(\s*\band\b\s*)+/gi, " ").trim();
+  // Collapse double spaces from successive strips.
+  cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
+  if (!cleaned) return theme;
+  const lower = cleaned.charAt(0) === cleaned.charAt(0).toLowerCase()
+    ? cleaned
+    : cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+  return prepend ? `${prepend} ${lower}` : lower;
 }
 
 function findPrimaryPersona(
