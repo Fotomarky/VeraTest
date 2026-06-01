@@ -246,7 +246,7 @@ async def cohort_narrative(run_id: str) -> str:
 
 async def run(run_id: str) -> None:
     """Run all three narrative agents in parallel and merge into Synthesis."""
-    await state.set_status(run_id, "synthesizing")  # remain in this phase
+    await state.set_status(run_id, "narrating")
 
     diff_task = structural_diff(run_id)
     hyp_task = symmetric_hypothesis(run_id)
