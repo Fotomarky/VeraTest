@@ -82,9 +82,10 @@ Each agent only writes its own slice (display name → file):
 | **Cognitive Walker** ×20 | `simulator.py` | `run.scenarios[i]`, images | `run.simulation_results[i]` (idempotent upsert) |
 | **Bias Auditor** | `auditor.py` | `run.simulation_results` | `run.audit` |
 | **Insight Analyst** | `synthesizer.py` | `run.simulation_results`, `run.audit` | `run.synthesis`, sets status=**synthesizing** |
-| **Report Narrators** ×3 | `narrative.py` | `run.synthesis`, images | `run.synthesis.{structural_diff,hypothesis_pros/cons,narrative}`, sets status=**complete** |
+| **Report Narrators** ×3 | `narrative.py` | `run.synthesis`, images | `run.synthesis.{structural_diff,hypothesis_pros/cons,narrative}`, sets status=**narrating** |
+| **FidelityAuditor** | `fidelity.py` | `run.simulation_results`, `run.scenarios` | `run.fidelity`, sets status=**complete** |
 
-**Single-screen mode:** when `variant_b_path` is absent (`None` / `""`), the pipeline skips cohort splitting. All 20 Cognitive Walkers evaluate `variant_a`; `directional_winner` is forced to `"tie"`; the Bias Auditor skips cohort imbalance checks; the Insight Analyst uses `SINGLE_SCREEN_SUMMARY_PROMPT`.
+**Single-screen mode:** when `variant_b_path` is absent (`None` / `""`), the pipeline skips cohort splitting. All 20 Cognitive Walkers evaluate `variant_a`; `directional_winner` is forced to `"tie"`; the Bias Auditor skips cohort imbalance checks; the Insight Analyst uses `SINGLE_SCREEN_SUMMARY_PROMPT`. The FidelityAuditor still runs (it operates on persona/rationale, not on the variant comparison).
 
 **The open/closed rule:** each agent is open to extension (new fields, new heuristics) but closed to upstream changes. An agent must never modify another agent's slice of state.
 
