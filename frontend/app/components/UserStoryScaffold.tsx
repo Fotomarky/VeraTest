@@ -40,10 +40,20 @@ const NEGATIVE_TO_NEED: Array<[RegExp, string]> = [
   [/\bpartial\b/gi,        "complete"],
   [/\bsparse\b/gi,         "comprehensive"],
   [/\bunclear\b/gi,        "clearer"],
+  [/\bambiguous\b/gi,      "clearer"],
   [/\bvague\b/gi,          "clearer"],
   [/\bconfusing\b/gi,      "clearer"],
   [/\bcomplicated\b/gi,    "simpler"],
   [/\boverwhelming\b/gi,   "simpler"],
+  [/\bexcessive\b/gi,      "less"],
+  [/\btoo many\b/gi,       "fewer"],
+  [/\btoo much\b/gi,       "less"],
+  [/\bredundant\b/gi,      "streamlined"],
+  [/\bintrusive\b/gi,      "less intrusive"],
+  [/\boutdated\b/gi,       "modernized"],
+  [/\bsuboptimal\b/gi,     "improved"],
+  [/\bdisjointed\b/gi,     "cohesive"],
+  [/\bbroken\b/gi,         "working"],
   [/\bhidden\b/gi,         "more visible"],
   [/\bburied\b/gi,         "more visible"],
   [/\bobscured\b/gi,       "more visible"],
@@ -106,6 +116,13 @@ function findPrimaryPersona(
   return top ? top[0] : "a user";
 }
 
+// Personas often start with "The " (e.g. "The Strategic Growth Seeker") —
+// since the template prepends "As a ", that produces "As a The ...".
+// Strip a leading article so the sentence reads naturally.
+function cleanPersona(name: string): string {
+  return name.replace(/^\s*(?:the|a|an)\s+/i, "").trim() || name;
+}
+
 const SEV_BORDER: Record<string, string> = {
   high: "border-l-red-400",
   medium: "border-l-amber-400",
@@ -147,7 +164,7 @@ export default function UserStoryScaffold({
       </div>
       <div className="space-y-3">
         {highMed.map((t, i) => {
-          const persona = findPrimaryPersona(t, resultsBySegment);
+          const persona = cleanPersona(findPrimaryPersona(t, resultsBySegment));
           const need = themeToNeed(t.theme);
           const text = `As a ${persona},\nI need ${need},\nso that I can ${goal}.`;
           const key = `friction-${i}`;
@@ -177,7 +194,7 @@ export default function UserStoryScaffold({
         })}
 
         {topWorked.map((t, i) => {
-          const persona = findPrimaryPersona(t, resultsBySegment);
+          const persona = cleanPersona(findPrimaryPersona(t, resultsBySegment));
           const text = `✅ As a ${persona}, ${t.theme} supports ${goal} —\n   preserve this in the next iteration.`;
           const key = `worked-${i}`;
           return (
