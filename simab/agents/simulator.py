@@ -7,6 +7,7 @@ structurally impossible because no agent ever sees both variants.
 Cohort assignment: agent_idx % 2  ->  0 = variant_a cohort, 1 = variant_b cohort.
 """
 from __future__ import annotations
+import contextlib
 import logging
 import time
 from pathlib import Path
@@ -18,6 +19,31 @@ from ..models import (
 )
 
 log = logging.getLogger(__name__)
+
+try:
+    from opentelemetry import trace as _otel_trace
+    _tracer = _otel_trace.get_tracer("simab.simulator")
+except ImportError:
+    _tracer = None
+
+
+@contextlib.contextmanager
+def _agent_span(scenario_id: str, agent_idx: int, cohort: str):
+    """Start a per-agent OpenTelemetry span so FidelityAuditor can attach
+    SpanEvaluations to the exact agent invocation. Yields the span (or None
+    when OpenTelemetry isn't installed) so the caller can extract span_id."""
+    if _tracer is None:
+        yield None
+        return
+    with _tracer.start_as_current_span(
+        name=f"sim_agent.{agent_idx}",
+        attributes={
+            "veratest.scenario_id": scenario_id,
+            "veratest.agent_idx": agent_idx,
+            "veratest.cohort": cohort,
+        },
+    ) as span:
+        yield span
 
 
 PROMPT = """\
@@ -152,13 +178,19 @@ async def run_one(run_id: str, agent_idx: int, scenario: ScenarioCard) -> SimRes
     model = MODEL_FLASH_LITE
 
     t0 = time.monotonic()
-    raw = await generate(
-        model=model,
-        prompt=prompt,
-        images=[image_bytes],
-        response_schema={},
-        temperature=0.4,
-    )
+    span_id: str | None = None
+    with _agent_span(scenario.id, agent_idx, cohort) as span:
+        if span is not None:
+            ctx = span.get_span_context()
+            if ctx.span_id:
+                span_id = format(ctx.span_id, "016x")
+        raw = await generate(
+            model=model,
+            prompt=prompt,
+            images=[image_bytes],
+            response_schema={},
+            temperature=0.4,
+        )
     latency_ms = int((time.monotonic() - t0) * 1000)
 
     raw_resonance = raw.get("resonance") or {}
@@ -197,6 +229,7 @@ async def run_one(run_id: str, agent_idx: int, scenario: ScenarioCard) -> SimRes
         metacognitive_reflection=str(raw.get("metacognitive_reflection", ""))[:500],
         model=model,
         latency_ms=latency_ms,
+        span_id=span_id,
     )
 
     written = await state.append_sim_result(run_id, result)
