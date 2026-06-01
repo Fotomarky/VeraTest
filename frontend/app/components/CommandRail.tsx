@@ -30,6 +30,13 @@ export default function CommandRail({
 }: Props) {
   const isComplete = status === "complete";
   const inProgress = !isComplete && status !== "failed";
+
+  // While in-progress, ProgressBlock below renders the truthful phase
+  // widget (phase chips + accurate timer + agents counter). Showing a
+  // separate sticky CommandRail with a fake "Simulating…" animation is
+  // just noise — collapse it.
+  if (inProgress) return null;
+
   const winner = synthesis?.directional_winner ?? "tie";
   const scoreA = synthesis?.cohort_resonance_overall?.["variant_a"] ?? 0;
   const scoreB = synthesis?.cohort_resonance_overall?.["variant_b"] ?? 0;

@@ -84,6 +84,8 @@ const PHASE_LABELS: Record<string, string> = {
   simulating: "Running simulation agents in parallel",
   auditing: "Auditing — checking for bias and confidence collapse",
   synthesizing: "Synthesising final report — clustering friction themes",
+  narrating: "Narrating — writing structural diff, hypothesis and cohort story",
+  calibrating: "Calibrating — measuring persona fidelity (LLM-as-a-Judge)",
   complete: "Complete",
   failed: "Failed",
 };
@@ -95,6 +97,8 @@ const PHASE_ORDER = [
   "simulating",
   "auditing",
   "synthesizing",
+  "narrating",
+  "calibrating",
 ] as const;
 
 const PHASE_SHORT: Record<string, string> = {
@@ -104,6 +108,8 @@ const PHASE_SHORT: Record<string, string> = {
   simulating: "Simulate",
   auditing: "Audit",
   synthesizing: "Synthesise",
+  narrating: "Narrate",
+  calibrating: "Calibrate",
 };
 
 function computeFoggAvg(results: SimResult[]): Record<string, Record<string, number>> {

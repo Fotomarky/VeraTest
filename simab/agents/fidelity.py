@@ -97,8 +97,11 @@ def llm_classify(*args, **kwargs):  # pragma: no cover - real-Phoenix path
 
 
 def _gemini_model():  # pragma: no cover - real-Phoenix path
+    # Flash-Lite is sufficient for a yes/no "in_character vs drifted"
+    # classification and has 1500/day free tier vs Flash's 20/day —
+    # keeps the demo unblocked on the free tier.
     from phoenix.evals import GeminiModel
-    return GeminiModel(model="gemini-2.5-flash")
+    return GeminiModel(model="gemini-2.5-flash-lite")
 
 
 def _build_persona_summary(scenario) -> str:
