@@ -29,6 +29,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import exports, ratelimit, state
 from .config import CONFIG
+from .integrations.phoenix import init_phoenix
 from .models import AudiencePreset, CreateRunResponse
 from .pipeline import run_pipeline
 
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
     Path(CONFIG.upload_dir).mkdir(parents=True, exist_ok=True)
     Path(CONFIG.db_path).parent.mkdir(parents=True, exist_ok=True)
     await state.get_db()  # initialize schema
+    init_phoenix()  # OpenInference tracing — no-op when PHOENIX_* env not set
     yield
     await state.close_db()
 
