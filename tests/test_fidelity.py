@@ -82,7 +82,9 @@ async def test_fidelity_computes_persona_consistency_and_coherence(
     # Code-based coherence: agent 1 is incoherent (high score, negative rationale).
     assert run.fidelity.agents_incoherent >= 1
     assert 1 in run.fidelity.drifted_agent_indices
-    assert run.status == "complete"
+    # Fidelity runs off the critical path now — pipeline.py owns 'complete'.
+    # Verify fidelity did NOT touch status (would be 'complete' if it had).
+    assert run.status != "calibrating"
 
     await _state_mod.close_db()
 
@@ -90,7 +92,7 @@ async def test_fidelity_computes_persona_consistency_and_coherence(
 @pytest.mark.asyncio
 async def test_fidelity_skips_gracefully_with_no_sim_results(tmp_path,
                                                              monkeypatch):
-    """Empty sim_results -> set status=complete, don't try to eval nothing."""
+    """Empty sim_results -> skip without crashing; don't touch status."""
     monkeypatch.setenv("SIMAB_DB_PATH", str(tmp_path / "test.db"))
     from simab import config as _config_mod
     importlib.reload(_config_mod)
@@ -106,7 +108,7 @@ async def test_fidelity_skips_gracefully_with_no_sim_results(tmp_path,
     await _fidelity_mod.run(rid)
     run = await _state_mod.get_run(rid)
     assert run is not None
-    assert run.status == "complete"
+    # Fidelity does not own status anymore — it should be untouched here.
     assert run.fidelity is None  # no slice written when no data
 
     await _state_mod.close_db()

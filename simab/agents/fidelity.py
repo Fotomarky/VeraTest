@@ -146,12 +146,16 @@ def _build_persona_summary(scenario) -> str:
 
 
 async def run(run_id: str) -> None:
-    """Phase 7 entry point. See module docstring for the contract."""
-    await state.set_status(run_id, "calibrating")
+    """Phase 7 entry point. See module docstring for the contract.
+
+    Runs off the critical path (pipeline.py marks status=complete after
+    narrative). This agent only writes its own fidelity slice + Phoenix
+    annotations + the cross-run drift dataset; it must not touch
+    run.status.
+    """
     run = await state.get_run(run_id)
     if run is None or not run.simulation_results:
         log.warning(f"[{run_id}] FidelityAuditor: no sim results, skipping")
-        await state.set_status(run_id, "complete")
         return
 
     scenarios_by_id = {s.id: s for s in run.scenarios}
@@ -252,7 +256,6 @@ async def run(run_id: str) -> None:
         drifted_agent_indices=drifted_idx,
     )
     await state.write_fidelity(run_id, report)
-    await state.set_status(run_id, "complete")
     log.info(
         f"[{run_id}] fidelity: persona_consistency={persona_consistency:.2f} "
         f"coherence={rationale_coherence:.2f} "
