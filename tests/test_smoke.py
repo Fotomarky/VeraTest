@@ -73,10 +73,11 @@ async def test_sim_result_idempotent_mutex():
         scenario_id="sc_001",
         scenario_segment="test",
         agent_idx=0,
-        presented_order=["variant_a", "variant_b"],
-        verdict="variant_b",
+        cohort="variant_a",
+        resonance={"motivation": 7, "identity": 6, "situation": 5, "beliefs": 6, "ability": 7, "trigger": 6},
+        resonance_overall=6.3,
+        intent_signal="would_research",
         confidence="high",
-        outcome="would_convert",
         rationale="ok",
     )
     written1 = await state.append_sim_result(run_id, result)
@@ -95,11 +96,13 @@ async def test_different_agent_idx_both_succeed():
         variant_a_path="/a", variant_b_path="/b",
     )
     r1 = SimResult(scenario_id="sc_001", scenario_segment="t", agent_idx=0,
-                   presented_order=["variant_a","variant_b"], verdict="variant_a",
-                   confidence="high", outcome="would_convert", rationale="")
+                   cohort="variant_a", resonance={"motivation":6,"identity":6,"situation":6,"beliefs":6,"ability":6,"trigger":6},
+                   resonance_overall=6.0, intent_signal="would_research",
+                   confidence="high", rationale="")
     r2 = SimResult(scenario_id="sc_001", scenario_segment="t", agent_idx=1,
-                   presented_order=["variant_b","variant_a"], verdict="variant_b",
-                   confidence="high", outcome="would_convert", rationale="")
+                   cohort="variant_b", resonance={"motivation":7,"identity":7,"situation":7,"beliefs":7,"ability":7,"trigger":7},
+                   resonance_overall=7.0, intent_signal="would_act",
+                   confidence="high", rationale="")
     assert await state.append_sim_result(run_id, r1) is True
     assert await state.append_sim_result(run_id, r2) is True
     assert await state.count_sim_results(run_id) == 2
@@ -158,3 +161,80 @@ async def test_persona_library_save_and_list():
     assert any(p.id == "sc_persona_1" for p in personas)
     tagged = await state.list_personas(tag="saas")
     assert any(p.id == "sc_persona_1" for p in tagged)
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — calibration layer model additions
+# ---------------------------------------------------------------------------
+
+def test_fidelity_report_model_roundtrips():
+    from simab.models import FidelityReport
+
+    fr = FidelityReport(
+        persona_consistency=0.95,
+        agents_drifted=1,
+        rationale_coherence=0.90,
+        agents_incoherent=2,
+        eval_explanations=["agent_3 used 'as an AI' phrasing"],
+        drifted_agent_indices=[3],
+    )
+    assert fr.persona_consistency == 0.95
+    reloaded = FidelityReport.model_validate_json(fr.model_dump_json())
+    assert reloaded.agents_drifted == 1
+    assert reloaded.drifted_agent_indices == [3]
+
+
+def test_simresult_has_optional_span_id():
+    sr = SimResult(
+        scenario_id="sc_1", scenario_segment="x",
+        agent_idx=0, cohort="variant_a",
+    )
+    assert sr.span_id is None
+    sr2 = sr.model_copy(update={"span_id": "abc123"})
+    assert sr2.span_id == "abc123"
+
+
+def test_run_has_optional_fidelity_slice():
+    from simab.models import Run
+    run = Run(run_id="r1", goal="g", variant_a_path="/x.png")
+    assert run.fidelity is None
+
+
+def test_run_status_includes_narrating_and_calibrating():
+    # Pydantic Literal values — round-trip via model_validate on the Run model.
+    from simab.models import Run
+    for status in ("narrating", "calibrating"):
+        run = Run(run_id=f"r_{status}", goal="g",
+                  variant_a_path="/x.png", status=status)
+        assert run.status == status
+
+
+@pytest.mark.asyncio
+async def test_write_fidelity_persists_slice(tmp_path, monkeypatch):
+    """write_fidelity round-trips through SQLite."""
+    monkeypatch.setenv("SIMAB_DB_PATH", str(tmp_path / "test.db"))
+    # Reload CONFIG so the new db_path is picked up.
+    import importlib
+    from simab import config as _config_mod
+    importlib.reload(_config_mod)
+    from simab import state as _state_mod
+    importlib.reload(_state_mod)
+    from simab.models import FidelityReport
+
+    rid = await _state_mod.create_run(
+        goal="g", audience_raw="a", persona_source="paste",
+        variant_a_path="/x.png", variant_b_path=None,
+    )
+    fr = FidelityReport(
+        persona_consistency=0.95, agents_drifted=1,
+        rationale_coherence=0.9, agents_incoherent=2,
+    )
+    await _state_mod.write_fidelity(rid, fr)
+
+    run = await _state_mod.get_run(rid)
+    assert run is not None
+    assert run.fidelity is not None
+    assert run.fidelity.persona_consistency == 0.95
+    assert run.fidelity.agents_drifted == 1
+    assert run.fidelity.agents_incoherent == 2
+    await _state_mod.close_db()

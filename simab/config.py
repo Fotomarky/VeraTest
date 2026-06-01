@@ -10,6 +10,9 @@ class Config:
     db_path: str
     upload_dir: str
     phoenix_endpoint: str | None
+    phoenix_api_key: str | None
+    phoenix_project: str
+    fidelity_drift_threshold: float
     frontend_url: str
     sim_concurrency: int
     num_agents: int
@@ -24,6 +27,11 @@ class Config:
             db_path=os.environ.get("SIMAB_DB_PATH", "./simab.db"),
             upload_dir=os.environ.get("SIMAB_UPLOAD_DIR", "./uploads"),
             phoenix_endpoint=os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or None,
+            phoenix_api_key=os.environ.get("PHOENIX_API_KEY") or None,
+            phoenix_project=os.environ.get("PHOENIX_PROJECT", "veratest"),
+            fidelity_drift_threshold=float(
+                os.environ.get("VERATEST_DRIFT_THRESHOLD", "0.25")
+            ),
             frontend_url=os.environ.get("FRONTEND_URL", "http://localhost:3000"),
             sim_concurrency=int(os.environ.get("SIMAB_SIM_CONCURRENCY", "6")),
             num_agents=int(os.environ.get("SIMAB_NUM_AGENTS", "20")),

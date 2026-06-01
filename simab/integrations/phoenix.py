@@ -39,11 +39,18 @@ def init_phoenix() -> bool:
         from phoenix.otel import register
         from openinference.instrumentation.google_genai import GoogleGenAIInstrumentor
 
-        tracer_provider = register(
-            project_name="simab",
+        register_kwargs = dict(
+            project_name=CONFIG.phoenix_project,
             endpoint=CONFIG.phoenix_endpoint,
             auto_instrument=False,
         )
+        if CONFIG.phoenix_api_key:
+            # Phoenix Cloud authenticates via standard OTLP Bearer header,
+            # not a custom `api_key` field.
+            register_kwargs["headers"] = {
+                "authorization": f"Bearer {CONFIG.phoenix_api_key}",
+            }
+        tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
         _initialized = True
         log.info(f"Phoenix tracing enabled — UI at http://localhost:6006")

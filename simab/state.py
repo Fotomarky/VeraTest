@@ -17,9 +17,10 @@ from typing import Optional
 
 import aiosqlite
 
-from .config import CONFIG
+from . import config as _config_module
 from .models import (
-    Run, Brief, ScenarioCard, SimResult, AuditReport, Synthesis, RunStatus
+    AudiencePreset, Run, Brief, ScenarioCard, SimResult, AuditReport,
+    Synthesis, FidelityReport, RunStatus,
 )
 
 
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS runs (
     updated_at TEXT NOT NULL,
     goal TEXT NOT NULL,
     audience_raw TEXT NOT NULL DEFAULT '',
+    audience_preset_json TEXT,
     persona_source TEXT NOT NULL DEFAULT 'paste',
     variant_a_path TEXT NOT NULL,
     variant_b_path TEXT NOT NULL,
@@ -40,6 +42,7 @@ CREATE TABLE IF NOT EXISTS runs (
     agent_allocations_json TEXT NOT NULL DEFAULT '[]',
     audit_json TEXT,
     synthesis_json TEXT,
+    fidelity_json TEXT,
     error TEXT
 );
 
@@ -78,11 +81,20 @@ async def get_db() -> aiosqlite.Connection:
     if _db is None:
         async with _init_lock:
             if _db is None:
-                _db = await aiosqlite.connect(CONFIG.db_path)
+                _db = await aiosqlite.connect(_config_module.CONFIG.db_path)
                 await _db.execute("PRAGMA journal_mode=WAL")
                 await _db.execute("PRAGMA foreign_keys=ON")
                 await _db.executescript(SCHEMA)
                 await _db.commit()
+                # Idempotent migration for pre-existing DBs created before
+                # the calibration-layer fidelity_json column was added.
+                try:
+                    await _db.execute(
+                        "ALTER TABLE runs ADD COLUMN fidelity_json TEXT"
+                    )
+                    await _db.commit()
+                except aiosqlite.OperationalError:
+                    pass  # column already exists
     return _db
 
 
@@ -103,18 +115,20 @@ async def create_run(
     audience_raw: str,
     persona_source: str,
     variant_a_path: str,
-    variant_b_path: str,
+    variant_b_path: Optional[str] = None,
+    audience_preset: Optional[AudiencePreset] = None,
 ) -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     db = await get_db()
+    preset_json = audience_preset.model_dump_json() if audience_preset else None
     await db.execute(
         """INSERT INTO runs
            (run_id, status, created_at, updated_at, goal, audience_raw,
-            persona_source, variant_a_path, variant_b_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            audience_preset_json, persona_source, variant_a_path, variant_b_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (run_id, "pending", now, now, goal, audience_raw,
-         persona_source, variant_a_path, variant_b_path),
+         preset_json, persona_source, variant_a_path, variant_b_path or ""),
     )
     await db.commit()
     return run_id
@@ -139,6 +153,7 @@ async def get_run(run_id: str) -> Optional[Run]:
     ) as cur:
         sim_rows = await cur.fetchall()
 
+    preset_json = data.get("audience_preset_json")
     return Run(
         run_id=data["run_id"],
         status=data["status"],
@@ -147,15 +162,17 @@ async def get_run(run_id: str) -> Optional[Run]:
         updated_at=datetime.fromisoformat(data["updated_at"]),
         goal=data["goal"],
         audience_raw=data["audience_raw"],
+        audience_preset=AudiencePreset.model_validate_json(preset_json) if preset_json else None,
         persona_source=data["persona_source"],
         variant_a_path=data["variant_a_path"],
-        variant_b_path=data["variant_b_path"],
+        variant_b_path=data["variant_b_path"] or None,  # "" stored for single-screen
         brief=Brief.model_validate_json(data["brief_json"]) if data["brief_json"] else None,
         scenarios=[ScenarioCard.model_validate(s) for s in json.loads(data["scenarios_json"])],
         agent_allocations=json.loads(data["agent_allocations_json"]),
         simulation_results=[SimResult.model_validate_json(r[0]) for r in sim_rows],
         audit=AuditReport.model_validate_json(data["audit_json"]) if data["audit_json"] else None,
         synthesis=Synthesis.model_validate_json(data["synthesis_json"]) if data["synthesis_json"] else None,
+        fidelity=FidelityReport.model_validate_json(data["fidelity_json"]) if data.get("fidelity_json") else None,
         error=data["error"],
     )
 
@@ -263,15 +280,35 @@ async def write_audit(run_id: str, audit: AuditReport) -> None:
 
 
 async def write_synthesis(run_id: str, synthesis: Synthesis) -> None:
+    """Persist the Synthesis slice. Status is NOT touched — the caller
+    (synthesizer for the first write, narrative for the second) owns its
+    own status transition via set_status(). Fidelity owns 'complete'."""
     db = await get_db()
     await db.execute(
-        """UPDATE runs SET synthesis_json=?, status=?,
+        """UPDATE runs SET synthesis_json=?,
            phases_complete=json_insert(phases_complete, '$[#]', ?),
            updated_at=? WHERE run_id=?""",
         (
             synthesis.model_dump_json(),
-            "complete",
             "synthesis",
+            datetime.now(timezone.utc).isoformat(),
+            run_id,
+        ),
+    )
+    await db.commit()
+
+
+async def write_fidelity(run_id: str, fidelity: FidelityReport) -> None:
+    """Persist the FidelityReport slice (Phase 7). Does NOT touch status —
+    the caller decides whether to advance the run to 'complete'."""
+    db = await get_db()
+    await db.execute(
+        """UPDATE runs SET fidelity_json=?,
+           phases_complete=json_insert(phases_complete, '$[#]', ?),
+           updated_at=? WHERE run_id=?""",
+        (
+            fidelity.model_dump_json(),
+            "fidelity",
             datetime.now(timezone.utc).isoformat(),
             run_id,
         ),

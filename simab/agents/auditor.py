@@ -1,17 +1,13 @@
-"""BiasAuditor — the trust gate.
+"""BiasAuditor v0.3 — the trust gate, redesigned for resonance.
 
-This is the differentiator. It reads all simulation results and flags
-systematic biases BEFORE the user sees a winner. The dashboard surfaces
-its warnings prominently.
+Position-bias checks are gone (structurally impossible: agents see one variant).
+New checks operate on the cohort + resonance vectors:
 
-Checks:
-1. Order bias — was the first-shown image picked too often? (We counterbalanced,
-   so first-shown ≈ 50/50 between variants. >65% one way = bias.)
-2. Confidence collapse — too many "low confidence" responses means the variants
-   are both weak, not that one is better.
-3. Coherence — do rationales actually support verdicts? (Quick LLM judge call.)
-4. Segment divergence — if different segments disagree strongly, that's a real
-   insight, not noise. Surface it.
+1. Cohort balance — counts per cohort and per (segment × cohort)
+2. Per-dimension variance — low variance signals the LLM collapsed to a default
+3. Mean-resonance inflation — flag when overall > 8.5 across both cohorts
+4. Confidence collapse — too many low-confidence responses
+5. Rationale coherence — does the rationale support the resonance scores?
 """
 from __future__ import annotations
 import logging
@@ -19,16 +15,16 @@ from collections import defaultdict
 
 from .. import state
 from ..llm import MODEL_FLASH, generate
-from ..models import AuditReport, SimResult
+from ..models import AuditReport, RESONANCE_DIMS, SimResult
 
 log = logging.getLogger(__name__)
 
 
 COHERENCE_PROMPT = """\
-For each (verdict, rationale) pair below, score whether the rationale actually
-supports the verdict. Return a JSON array of scores 0.0-1.0 in the same order.
-1.0 = rationale clearly justifies the verdict.
-0.0 = rationale contradicts or is unrelated to the verdict.
+For each (overall_resonance_score, rationale) pair below, score whether the
+rationale supports the overall score. Return a JSON array of scores 0.0–1.0
+in the same order. 1.0 = rationale clearly justifies the score.
+0.0 = rationale contradicts or is unrelated.
 
 PAIRS:
 {pairs}
@@ -36,37 +32,68 @@ PAIRS:
 Respond with ONLY: {{"scores": [0.9, 0.7, ...]}}
 """
 
+INFLATION_THRESHOLD = 8.5
+LOW_VARIANCE_THRESHOLD = 0.5
+# Mid-range guard for collapse detection. Low variance is only suspicious when
+# the mean sits in the indeterminate middle. Uniformly low or uniformly high
+# scores across personas are real cross-persona signal, not model collapse.
+COLLAPSE_MIDRANGE_LOW = 4.0
+COLLAPSE_MIDRANGE_HIGH = 7.0
+COHORT_IMBALANCE_TOLERANCE = 0.2  # |cohort_a - cohort_b| / total agents
 
-def _compute_first_position_win_rate(results: list[SimResult]) -> float:
-    """How often did the first-shown image win? Should be ~0.5 with counterbalancing."""
-    if not results:
-        return 0.5
-    first_wins = 0
-    decided = 0
+
+def _cohort_balance(results: list[SimResult]) -> dict[str, int]:
+    out: dict[str, int] = {"variant_a": 0, "variant_b": 0}
     for r in results:
-        if r.verdict in ("neither", "needs_more_info"):
-            continue
-        decided += 1
-        # presented_order[0] is what was shown first
-        if r.verdict == r.presented_order[0]:
-            first_wins += 1
-    return first_wins / decided if decided > 0 else 0.5
+        out[r.cohort] += 1
+    return out
 
 
-def _segment_breakdown(results: list[SimResult]) -> dict[str, dict[str, int]]:
-    """{ segment -> { variant_a: 3, variant_b: 7, ... } }"""
+def _cohort_persona_balance(results: list[SimResult]) -> dict[str, dict[str, int]]:
+    out: dict[str, dict[str, int]] = defaultdict(lambda: {"variant_a": 0, "variant_b": 0})
+    for r in results:
+        out[r.scenario_segment][r.cohort] += 1
+    return {k: dict(v) for k, v in out.items()}
+
+
+def _per_dim_stats(results: list[SimResult]) -> dict[str, dict[str, float]]:
+    """{dim: {mean, variance}} for every resonance dim."""
+    out: dict[str, dict[str, float]] = {}
+    n = len(results)
+    if n == 0:
+        return {dim: {"mean": 0.0, "variance": 0.0} for dim in RESONANCE_DIMS}
+    for dim in RESONANCE_DIMS:
+        scores = [r.resonance.get(dim, 5) for r in results]
+        mean = sum(scores) / n
+        var = sum((s - mean) ** 2 for s in scores) / n
+        out[dim] = {"mean": round(mean, 3), "variance": round(var, 3)}
+    return out
+
+
+def _collapsed_dims(stats: dict[str, dict[str, float]]) -> list[str]:
+    """Dims where low variance is suspicious (not explained by mean-extreme signal)."""
+    return [
+        dim
+        for dim, s in stats.items()
+        if s["variance"] < LOW_VARIANCE_THRESHOLD
+        and COLLAPSE_MIDRANGE_LOW <= s["mean"] <= COLLAPSE_MIDRANGE_HIGH
+    ]
+
+
+def _segment_divergence(results: list[SimResult]) -> dict[str, dict[str, int]]:
+    """{segment: {variant_a_count, variant_b_count}} from intent_signal."""
     out: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for r in results:
-        out[r.scenario_segment][r.verdict] += 1
+        out[r.scenario_segment][r.intent_signal] += 1
     return {k: dict(v) for k, v in out.items()}
 
 
 async def _score_coherence(results: list[SimResult]) -> float:
-    """LLM-as-judge on (verdict, rationale) pairs. One call total."""
+    """LLM-as-judge on (overall_resonance, rationale) pairs. One call."""
     if not results:
         return 1.0
     pairs_text = "\n".join(
-        f"{i+1}. verdict={r.verdict} | rationale={r.rationale[:300]}"
+        f"{i+1}. overall={r.resonance_overall:.1f} | rationale={r.rationale[:300]}"
         for i, r in enumerate(results)
     )
     try:
@@ -82,40 +109,71 @@ async def _score_coherence(results: list[SimResult]) -> float:
         return sum(scores) / len(scores)
     except Exception as e:
         log.warning(f"Coherence scoring failed: {e}")
-        return 1.0  # fail open, don't penalize the user
+        return 1.0  # fail open
 
 
 def _build_warnings(
-    first_pos_rate: float,
+    cohort_balance: dict[str, int],
+    collapsed_dims: list[str],
+    inflation: bool,
     low_conf_rate: float,
     coherence: float,
-    segment_divergence: dict[str, dict[str, int]],
+    single_screen: bool = False,
 ) -> list[str]:
-    warnings = []
-    if abs(first_pos_rate - 0.5) > 0.15:
-        bias_direction = "first-shown" if first_pos_rate > 0.5 else "second-shown"
+    warnings: list[str] = []
+    total = sum(cohort_balance.values())
+    if total > 0 and not single_screen:
+        diff = abs(cohort_balance["variant_a"] - cohort_balance["variant_b"])
+        if diff / total > COHORT_IMBALANCE_TOLERANCE:
+            warnings.append(
+                f"Cohort imbalance: variant_a={cohort_balance['variant_a']} vs "
+                f"variant_b={cohort_balance['variant_b']}. Compare with care."
+            )
+    if collapsed_dims:
         warnings.append(
-            f"Position bias detected: {first_pos_rate:.0%} of decisions favored "
-            f"the {bias_direction} image. Treat results as directional only."
+            f"Score collapse on {', '.join(collapsed_dims)}: agents gave nearly "
+            f"identical mid-range answers across personas, suggesting the LLM "
+            f"defaulted rather than evaluated for those dimensions."
+        )
+    if inflation:
+        warnings.append(
+            f"Resonance inflation: both cohorts averaged > {INFLATION_THRESHOLD}/10. "
+            f"LLM agreeableness suspected — relative gap is still informative, "
+            f"absolute scores are not."
         )
     if low_conf_rate > 0.4:
         warnings.append(
-            f"{low_conf_rate:.0%} of agents reported low confidence. Both "
-            f"variants may have unresolved issues — fix obvious friction first."
+            f"{low_conf_rate:.0%} of agents reported low confidence. The page may "
+            f"be ambiguous for these personas — fix obvious clarity issues first."
         )
     if coherence < 0.7:
         warnings.append(
-            f"Rationale coherence is {coherence:.0%}. Some verdicts aren't well "
+            f"Rationale coherence is {coherence:.0%}. Some scores aren't well "
             f"justified by the agents' own reasoning."
         )
-    # Strong segment divergence is signal, not noise — flag it as insight
     return warnings
 
 
-def _trust_level(first_pos_rate: float, low_conf_rate: float, coherence: float) -> str:
-    if (abs(first_pos_rate - 0.5) > 0.2 or low_conf_rate > 0.5 or coherence < 0.5):
+def _trust_level(
+    cohort_balance: dict[str, int],
+    inflation: bool,
+    low_conf_rate: float,
+    coherence: float,
+    collapsed_dim_count: int,
+    single_screen: bool = False,
+) -> str:
+    total = sum(cohort_balance.values())
+    cohort_skew = 0.0 if single_screen else (
+        (abs(cohort_balance["variant_a"] - cohort_balance["variant_b"]) / total) if total else 0
+    )
+    if inflation or low_conf_rate > 0.5 or coherence < 0.5 or collapsed_dim_count >= 3:
         return "low"
-    if (abs(first_pos_rate - 0.5) > 0.1 or low_conf_rate > 0.3 or coherence < 0.75):
+    if (
+        cohort_skew > COHORT_IMBALANCE_TOLERANCE
+        or low_conf_rate > 0.3
+        or coherence < 0.75
+        or collapsed_dim_count >= 1
+    ):
         return "medium"
     return "high"
 
@@ -130,34 +188,49 @@ async def run(run_id: str) -> AuditReport:
     if not results:
         raise ValueError("No simulation results to audit")
 
-    first_pos_rate = _compute_first_position_win_rate(results)
+    single_screen = not run.variant_b_path
+    cohort_balance = _cohort_balance(results)
+    cohort_persona_balance = _cohort_persona_balance(results)
+    dim_stats = _per_dim_stats(results)
+    per_dim_var = {dim: s["variance"] for dim, s in dim_stats.items()}
+    seg_div = _segment_divergence(results)
+
+    overall_mean = sum(r.resonance_overall for r in results) / len(results)
+    inflation = overall_mean > INFLATION_THRESHOLD
+
     low_conf_rate = sum(1 for r in results if r.confidence == "low") / len(results)
-    segment_div = _segment_breakdown(results)
     coherence = await _score_coherence(results)
 
-    trust = _trust_level(first_pos_rate, low_conf_rate, coherence)
-    warnings = _build_warnings(first_pos_rate, low_conf_rate, coherence, segment_div)
+    collapsed_dims = _collapsed_dims(dim_stats)
+    collapsed_dim_count = len(collapsed_dims)
+    trust = _trust_level(cohort_balance, inflation, low_conf_rate, coherence, collapsed_dim_count, single_screen)
+    warnings = _build_warnings(cohort_balance, collapsed_dims, inflation, low_conf_rate, coherence, single_screen)
 
     recommended_action = {
-        "high": "Results are reliable. Proceed with confidence.",
-        "medium": "Results are directional. Consider validating with real traffic.",
-        "low": "Results are unreliable. Re-run with more scenario diversity or "
-               "fix obvious issues in the variants first.",
+        "high":   "Results are reliable. Proceed with confidence.",
+        "medium": "Results are directional. Validate before scaling traffic.",
+        "low":    "Results are unreliable. Address the warnings before acting.",
     }[trust]
 
     audit = AuditReport(
         trust_level=trust,
-        order_bias_detected=abs(first_pos_rate - 0.5) > 0.15,
-        first_position_win_rate=round(first_pos_rate, 3),
         confidence_collapse=low_conf_rate > 0.4,
         low_confidence_rate=round(low_conf_rate, 3),
         avg_rationale_coherence=round(coherence, 3),
-        segment_divergence=segment_div,
+        segment_divergence=seg_div,
+        cohort_balance=cohort_balance,
+        cohort_persona_balance=cohort_persona_balance,
+        per_dim_variance=per_dim_var,
+        inflation_warning=inflation,
         warnings=warnings,
         recommended_action=recommended_action,
     )
 
     await state.write_audit(run_id, audit)
-    log.info(f"[{run_id}] bias_auditor: trust={trust} bias_rate={first_pos_rate:.2f} "
-             f"low_conf={low_conf_rate:.2f} coherence={coherence:.2f}")
+    log.info(
+        f"[{run_id}] bias_auditor: trust={trust} "
+        f"cohort=({cohort_balance['variant_a']}/{cohort_balance['variant_b']}) "
+        f"overall_mean={overall_mean:.2f} low_conf={low_conf_rate:.2f} "
+        f"coherence={coherence:.2f} collapsed_dims={collapsed_dim_count}"
+    )
     return audit

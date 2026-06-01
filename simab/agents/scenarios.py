@@ -10,10 +10,104 @@ import logging
 
 from .. import state
 from ..config import CONFIG
+from ..integrations.phoenix_client import (
+    audience_signature as _audience_signature,
+    get_persona_drift_history,
+)
 from ..llm import MODEL_FLASH, generate
 from ..models import ScenarioCard
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Calibration layer — anti-drift constraint + stress-test persona
+# ---------------------------------------------------------------------------
+
+ANTI_DRIFT_CONSTRAINT = (
+    "STAY IN CHARACTER. Prior runs show this persona archetype drifts toward "
+    "a 'helpful UX evaluator' voice {drift_pct}% of the time. You are NOT a "
+    "UX expert. You are this specific person: react in their voice, with "
+    "their patience and concerns, NOT a generic professional analysis."
+)
+
+
+def _inject_drift_constraints(
+    cards: list[ScenarioCard],
+    history: dict[str, float],
+    threshold: float,
+) -> list[ScenarioCard]:
+    """For each card whose archetype (segment) has a historical drift rate
+    above `threshold`, prepend an anti-drift constraint to its constraints
+    list. Returns a new list — does not mutate inputs.
+
+    This is the cross-run learning loop: the FidelityAuditor records drift
+    in Phoenix; the next run's Panel Recruiter reads it back and tightens
+    the prompt for archetypes that have a track record of slipping.
+    """
+    out: list[ScenarioCard] = []
+    for card in cards:
+        drift = history.get(card.segment, 0.0)
+        if drift > threshold:
+            extra = ANTI_DRIFT_CONSTRAINT.format(drift_pct=int(drift * 100))
+            out.append(card.model_copy(update={
+                "constraints": [extra, *card.constraints],
+            }))
+        else:
+            out.append(card)
+    return out
+
+
+# Visibly labelled in the carousel — the leading "stress_test_" is the marker
+# the frontend uses (see PersonaCard) to badge this persona as a calibration
+# anchor rather than an audience segment.
+STRESS_TEST_PERSONA = ScenarioCard(
+    id="sc_stress",
+    segment="stress_test_conflicted_senior",
+    intent="evaluate",
+    decision_style="cautious",
+    device="desktop",
+    traffic_source="referral",
+    context=(
+        "A 65-year-old who is technologically cautious but is also a former "
+        "software developer. Skeptical of modern marketing aesthetics but "
+        "understands technical depth — internal conflict between caution "
+        "and expertise."
+    ),
+    constraints=[
+        "Patience for marketing fluff is near zero.",
+        "Demand technical specifics before trusting a claim.",
+    ],
+    time_pressure="medium",
+    price_sensitivity="medium",
+    patience_threshold="low",
+    communication_style="precise, mildly skeptical, occasionally dry",
+    visual_style_preference="minimal, dense, technical",
+)
+
+
+def _inject_stress_test_persona(cards: list[ScenarioCard]) -> list[ScenarioCard]:
+    """Always include one deliberately-difficult persona so the
+    FidelityAuditor has a reliable signal to surface — standard
+    adversarial-evaluation practice. Hiding it would be a demo-time hack;
+    showing it makes the calibration story honest.
+
+    The stress-test persona gets 1/(N+1) traffic weight; existing cards are
+    rescaled to N/(N+1) total so weights still sum to 1.0.
+    """
+    if not cards:
+        return [STRESS_TEST_PERSONA.model_copy(update={"traffic_weight": 1.0})]
+    n = len(cards)
+    rescale = n / (n + 1)
+    weight = 1 / (n + 1)
+    rescaled = [
+        c.model_copy(update={"traffic_weight": c.traffic_weight * rescale})
+        for c in cards
+    ]
+    rescaled.append(
+        STRESS_TEST_PERSONA.model_copy(update={"traffic_weight": weight})
+    )
+    return rescaled
 
 
 VARIATION_PROMPT = """\
@@ -137,6 +231,23 @@ async def run(run_id: str, num_agents: int | None = None) -> list[ScenarioCard]:
         final_scenarios.append(sc)
 
     final_scenarios = final_scenarios[:num_agents]
+
+    # ── Calibration layer (Arize track) ──────────────────────────────────
+    # Read cross-run drift history and tighten constraints on archetypes
+    # that have a track record of slipping out of character.
+    sig = _audience_signature(run.audience_raw or run.goal)
+    history = get_persona_drift_history(audience_signature=sig)
+    if history:
+        log.info(
+            f"[{run_id}] drift history: "
+            + ", ".join(f"{a}={r:.0%}" for a, r in history.items())
+        )
+    final_scenarios = _inject_drift_constraints(
+        final_scenarios, history, threshold=CONFIG.fidelity_drift_threshold,
+    )
+    # Always include one visibly-labelled stress-test persona so the
+    # FidelityAuditor has a reliable failure signal to operate on.
+    final_scenarios = _inject_stress_test_persona(final_scenarios)
 
     await state.write_scenarios(run_id, final_scenarios, allocations)
     log.info(f"[{run_id}] scenario_builder: {len(final_scenarios)} agents across "

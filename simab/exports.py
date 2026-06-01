@@ -15,14 +15,16 @@ from .models import Run
 # PM-friendly translation
 # ---------------------------------------------------------------------------
 
-# Technical → product-manager phrasing. The dashboard speaks in audit jargon
-# ("order bias detected"); PRDs need plain language.
+# Technical → product-manager phrasing. The dashboard speaks in audit jargon;
+# PRDs need plain language.
 _PM_TRANSLATIONS = {
-    "Position bias detected": "Results may be skewed by which design users saw first",
-    "Rationale coherence": "Internal consistency check",
-    "confidence collapse": "low overall confidence — both designs may have issues",
-    "scenario diversity": "audience variety",
-    "stigmergy": "automated coordination",
+    "Cohort imbalance":          "Sample split between the two designs wasn't even — interpret with care",
+    "Score collapse":            "AI gave nearly identical scores across personas — possible model collapse",
+    "Resonance inflation":       "Scores skewed high overall — trust the gap between designs, not the absolute numbers",
+    "Rationale coherence":       "Internal consistency check",
+    "confidence collapse":       "low overall confidence — both designs may have unresolved issues",
+    "scenario diversity":        "audience variety",
+    "stigmergy":                 "automated coordination",
 }
 
 
@@ -49,20 +51,31 @@ def pm_summary(run: Run) -> dict:
     audit = run.audit
 
     trust_phrasing = {
-        "high": "Findings are reliable enough to act on.",
+        "high":   "Findings are reliable enough to act on.",
         "medium": "Findings are directional — useful for narrowing options, but validate with real traffic before big bets.",
-        "low": "Findings are unreliable. Fix obvious issues in the variants and re-run.",
+        "low":    "Findings are unreliable. Address the warnings before acting.",
     }
 
-    winner_phrasing = {
-        "variant_a": "Variant A is the better choice",
-        "variant_b": "Variant B is the better choice",
-        "neither": "Neither variant is clearly better — they're effectively tied",
+    sig_phrasing = {
+        "strong":   "clearly stronger",
+        "moderate": "moderately stronger",
+        "weak":     "slightly stronger",
+        "tie":      "similarly",
     }
+    sig = synth.gap_significance
+    if synth.directional_winner == "variant_a":
+        headline = f"Variant A resonates {sig_phrasing[sig]}"
+    elif synth.directional_winner == "variant_b":
+        headline = f"Variant B resonates {sig_phrasing[sig]}"
+    else:
+        headline = "No clear winner — designs resonate similarly"
+
+    a_overall = synth.cohort_resonance_overall.get("variant_a", 0.0)
+    b_overall = synth.cohort_resonance_overall.get("variant_b", 0.0)
 
     return {
         "ready": True,
-        "headline": winner_phrasing[synth.winner],
+        "headline": headline,
         "confidence": audit.trust_level,
         "confidence_note": trust_phrasing[audit.trust_level],
         "summary": synth.one_line_summary,
@@ -72,8 +85,11 @@ def pm_summary(run: Run) -> dict:
             for t in synth.top_friction[:3]
         ],
         "caveats": [pm_translate(w) for w in audit.warnings],
-        "weighted_split": {
-            k: f"{v * 100:.0f}%" for k, v in synth.weighted_vote.items()
+        "resonance_scores": {
+            "variant_a": f"{a_overall:.1f}/10",
+            "variant_b": f"{b_overall:.1f}/10",
+            "gap":       f"{synth.resonance_gap:+.1f}",
+            "significance": sig,
         },
     }
 
@@ -108,18 +124,59 @@ def to_markdown(run: Run, share_url: Optional[str] = None) -> str:
             lines.append(f"- {pm_translate(w)}")
         lines.append("")
 
-    # Weighted result
+    # Cohort resonance result
     lines.append("## Result")
     lines.append("")
-    lines.append("| Variant | Weighted vote |")
+    lines.append("| Variant | Resonance |")
     lines.append("|---|---|")
-    for variant in ("variant_a", "variant_b", "neither", "needs_more_info"):
-        share = synth.weighted_vote.get(variant, 0)
-        if share > 0:
-            label = variant.replace("_", " ").title()
-            marker = " ← winner" if variant == synth.winner else ""
-            lines.append(f"| {label}{marker} | {share * 100:.0f}% |")
+    for variant in ("variant_a", "variant_b"):
+        score = synth.cohort_resonance_overall.get(variant, 0)
+        label = variant.replace("_", " ").title()
+        marker = " ← directional winner" if variant == synth.directional_winner else ""
+        lines.append(f"| {label}{marker} | {score:.1f}/10 |")
+    sign = "+" if synth.resonance_gap >= 0 else ""
+    lines.append(
+        f"\n**Gap:** {sign}{synth.resonance_gap:.1f} "
+        f"(significance: _{synth.gap_significance}_)\n"
+    )
+    lines.append(
+        "_Resonance measures how well each design fits the audience's motives, "
+        "beliefs and situation. It is a necessary condition for conversion, "
+        "not a prediction of conversion rate._"
+    )
     lines.append("")
+
+    # Narrative (v0.3 P2: cohort_narrative agent output)
+    if synth.narrative:
+        lines.append("## Analysis")
+        lines.append("")
+        lines.append(synth.narrative)
+        lines.append("")
+
+    # Structural diff (v0.3 P2: factual differences only, no winner judgment)
+    if synth.structural_diff:
+        lines.append("## What's different between the variants")
+        lines.append("")
+        for d in synth.structural_diff[:10]:
+            lines.append(f"- {d}")
+        lines.append("")
+
+    # Symmetric hypothesis
+    if synth.hypothesis_pros or synth.hypothesis_cons:
+        lines.append("## Tradeoffs (balanced view)")
+        lines.append("")
+        for variant in ("variant_a", "variant_b"):
+            label = variant.replace("_", " ").title()
+            pros = synth.hypothesis_pros.get(variant, [])
+            cons = synth.hypothesis_cons.get(variant, [])
+            if not (pros or cons):
+                continue
+            lines.append(f"**{label}**")
+            for p in pros:
+                lines.append(f"- ✓ {p}")
+            for c in cons:
+                lines.append(f"- ✗ {c}")
+            lines.append("")
 
     # Friction
     if synth.top_friction:
@@ -132,14 +189,16 @@ def to_markdown(run: Run, share_url: Optional[str] = None) -> str:
                 lines.append(f"  > _\"{t.example_quotes[0]}\"_")
         lines.append("")
 
-    # Segment splits
+    # Segment splits (per-segment resonance overall, per cohort)
     if synth.segment_splits:
-        lines.append("## Segment splits")
+        lines.append("## Per-segment resonance")
         lines.append("")
         for seg, splits in list(synth.segment_splits.items())[:6]:
-            pct = ", ".join(f"{k.replace('_', ' ')}: {v * 100:.0f}%"
-                            for k, v in splits.items() if v > 0)
-            lines.append(f"- **{seg}** — {pct}")
+            parts = ", ".join(
+                f"{k.replace('_', ' ')}: {v:.1f}/10"
+                for k, v in splits.items() if v > 0
+            )
+            lines.append(f"- **{seg}** — {parts}")
         lines.append("")
 
     # Recommendation

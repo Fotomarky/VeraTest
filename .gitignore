@@ -18,6 +18,7 @@ node_modules/
 out/
 .vercel
 .env*.local
+*.tsbuildinfo
 
 # SimAB runtime data
 simab.db

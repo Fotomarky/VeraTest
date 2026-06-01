@@ -20,27 +20,24 @@ type ScenarioCard = {
 type SimResult = {
   scenario_id: string;
   scenario_segment: string;
-  verdict: string;
+  cohort: "variant_a" | "variant_b";
+  resonance: Record<string, number>;
+  resonance_overall: number;
   confidence: string;
-  outcome: string;
-  rationale: string;
-  visual_impact?: Record<string, number>;
-  attention_path?: string[];
-  messaging_alignment?: string;
-  first_impression?: string;
   friction_points: string[];
   what_worked: string[];
-  fogg_motivation?: number;
-  fogg_ability?: number;
-  fogg_trigger_clarity?: string;
+  rationale: string;
+  first_impression?: string;
   trust_signals_missing?: string[];
-  loss_gain_framing?: string;
+  metacognitive_reflection?: string;
 };
 
 type Props = {
   persona: ScenarioCard;
   results: SimResult[];
   winner: string;
+  segmentColor?: string;
+  isSingleScreen?: boolean;
 };
 
 const DEVICE_ICON: Record<string, string> = { desktop: "🖥", mobile: "📱", tablet: "📲" };
@@ -51,40 +48,66 @@ const PATIENCE_COLOR: Record<string, string> = {
   low: "bg-red-50 text-red-700 border-red-200",
 };
 
-function votePercent(results: SimResult[], variant: string): number {
-  if (!results.length) return 0;
-  return Math.round((results.filter((r) => r.verdict === variant).length / results.length) * 100);
+const RESONANCE_META: Record<string, { label: string; color: string; tooltip: string }> = {
+  motivation: {
+    label: "Motivation",
+    color: "bg-blue-400",
+    tooltip: "How strongly this persona wants to take action. Driven by desire, emotion, and relevance to their goals.",
+  },
+  ability: {
+    label: "Ability",
+    color: "bg-violet-400",
+    tooltip: "How easy the page makes it to act. Low scores indicate friction: unclear steps, missing info, or cognitive overload.",
+  },
+  identity: {
+    label: "Identity",
+    color: "bg-amber-400",
+    tooltip: "How well the page matches this persona's self-image and values. High score = strong personal fit.",
+  },
+  situation: {
+    label: "Situation",
+    color: "bg-teal-400",
+    tooltip: "How their current context (time pressure, device, mindset) shapes their response to the page.",
+  },
+  beliefs: {
+    label: "Beliefs",
+    color: "bg-pink-400",
+    tooltip: "How well the page aligns with their existing worldview and prior expectations about the product or category.",
+  },
+  trigger: {
+    label: "Trigger",
+    color: "bg-orange-400",
+    tooltip: "How effectively the page prompts them to act now — urgency cues, CTAs, and timing signals.",
+  },
+};
+
+const DIM_ORDER = ["motivation", "ability", "identity", "situation", "beliefs", "trigger"];
+
+function resonancePercents(results: SimResult[]): { pctA: number; pctB: number } {
+  const aScores = results.filter((r) => r.cohort === "variant_a").map((r) => r.resonance_overall);
+  const bScores = results.filter((r) => r.cohort === "variant_b").map((r) => r.resonance_overall);
+  const avgA = aScores.length ? aScores.reduce((s, v) => s + v, 0) / aScores.length : 0;
+  const avgB = bScores.length ? bScores.reduce((s, v) => s + v, 0) / bScores.length : 0;
+  const total = avgA + avgB;
+  if (total === 0) return { pctA: 50, pctB: 50 };
+  const pctA = Math.round((avgA / total) * 100);
+  return { pctA, pctB: 100 - pctA };
 }
 
-function avgVisualImpact(results: SimResult[]): Record<string, number> {
-  const totals: Record<string, number> = {};
+function avgResonanceDims(results: SimResult[]): Record<string, number> {
+  const sums: Record<string, number> = {};
   const counts: Record<string, number> = {};
   for (const r of results) {
-    for (const [v, score] of Object.entries(r.visual_impact || {})) {
-      totals[v] = (totals[v] || 0) + score;
-      counts[v] = (counts[v] || 0) + 1;
+    for (const [dim, score] of Object.entries(r.resonance ?? {})) {
+      sums[dim] = (sums[dim] ?? 0) + score;
+      counts[dim] = (counts[dim] ?? 0) + 1;
     }
   }
-  return Object.fromEntries(
-    Object.entries(totals).map(([v, t]) => [v, Math.round((t / counts[v]) * 10) / 10])
-  );
-}
-
-function avgFogg(results: SimResult[]): { motivation: number; ability: number } | null {
-  const ms = results.map((r) => r.fogg_motivation || 0).filter((v) => v > 0);
-  const as_ = results.map((r) => r.fogg_ability || 0).filter((v) => v > 0);
-  if (!ms.length && !as_.length) return null;
-  const avg = (arr: number[]) =>
-    arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : 0;
-  return { motivation: avg(ms), ability: avg(as_) };
-}
-
-function topAttentionPath(results: SimResult[]): string[] {
-  let best: string[] = [];
-  for (const r of results) {
-    if ((r.attention_path?.length || 0) > best.length) best = r.attention_path || [];
+  const out: Record<string, number> = {};
+  for (const dim of Object.keys(sums)) {
+    out[dim] = Math.round((sums[dim] / counts[dim]) * 10) / 10;
   }
-  return best.slice(0, 5);
+  return out;
 }
 
 function commonTrustGaps(results: SimResult[]): string[] {
@@ -100,28 +123,55 @@ function commonTrustGaps(results: SimResult[]): string[] {
     .map(([k]) => k);
 }
 
-export default function PersonaCard({ persona, results, winner }: Props) {
-  const pctA = votePercent(results, "variant_a");
-  const pctB = votePercent(results, "variant_b");
-  const winningVariant = pctA > pctB ? "variant_a" : pctB > pctA ? "variant_b" : null;
-  const avgImpact = avgVisualImpact(results);
-  const fogg = avgFogg(results);
-  const attentionPath = topAttentionPath(results);
-  const trustGaps = commonTrustGaps(results);
+function Tip({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <span className="relative group/tip inline-block">
+      {children}
+      <span className="pointer-events-none absolute z-50 bottom-full left-0 mb-2 w-56 rounded bg-neutral-800 text-white text-[10px] leading-snug px-2 py-1.5 opacity-0 group-hover/tip:opacity-100 transition-opacity whitespace-normal shadow-lg">
+        {text}
+        <span className="absolute top-full left-0 ml-2 border-4 border-transparent border-t-neutral-800" />
+      </span>
+    </span>
+  );
+}
 
-  const alignments = results.map((r) => r.messaging_alignment).filter(Boolean);
-  const topAlignment = alignments.length
-    ? (["strong", "moderate", "weak"].find(
-        (a) => alignments.filter((x) => x === a).length > alignments.length / 2
-      ) ?? "moderate")
-    : null;
+function AgentDot({ color }: { color: string }) {
+  return (
+    <svg width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"
+         style={{ display: "inline-block", flexShrink: 0 }}>
+      {/* Hat */}
+      <rect x="3" y="0" width="6" height="2" fill="#5C3A1E" />
+      <rect x="2" y="2" width="8" height="1" fill="#5C3A1E" />
+      {/* Head */}
+      <rect x="4" y="3" width="4" height="3" fill="#F5CBA7" />
+      {/* Body — segment color */}
+      <rect x="3" y="6" width="6" height="4" fill={color} />
+      {/* Legs */}
+      <rect x="3" y="10" width="2" height="4" fill="#2C3E50" />
+      <rect x="7" y="10" width="2" height="4" fill="#2C3E50" />
+    </svg>
+  );
+}
+
+export default function PersonaCard({ persona, results, winner, segmentColor, isSingleScreen }: Props) {
+  const { pctA, pctB } = resonancePercents(results);
+  const winningVariant = pctA > pctB ? "variant_a" : pctB > pctA ? "variant_b" : null;
+  const dims = avgResonanceDims(results);
+  const trustGaps = commonTrustGaps(results);
+  const hasDims = Object.keys(dims).length > 0;
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white overflow-hidden">
+    <div
+      className="rounded-lg border border-neutral-200 bg-white overflow-hidden"
+      style={segmentColor ? { borderLeftWidth: "4px", borderLeftColor: segmentColor } : undefined}
+    >
       {/* Header */}
       <div className="px-4 py-3 border-b border-neutral-100 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-semibold text-sm truncate">{persona.segment}</div>
+          <div className="flex items-center gap-1.5">
+            {segmentColor && <AgentDot color={segmentColor} />}
+            <div className="font-semibold text-sm truncate">{persona.segment}</div>
+          </div>
           <p className="text-xs text-neutral-500 mt-0.5 leading-snug line-clamp-2">
             {persona.context || "No context provided"}
           </p>
@@ -140,82 +190,56 @@ export default function PersonaCard({ persona, results, winner }: Props) {
         </div>
       </div>
 
-      {/* Vote bar */}
-      <div className="px-4 pt-3 pb-1">
-        <div className="flex items-center justify-between text-xs text-neutral-500 mb-1">
-          <span>Variant A</span>
-          <span className="font-medium text-neutral-800">{results.length} agent{results.length !== 1 ? "s" : ""}</span>
-          <span>Variant B</span>
-        </div>
-        <div className="flex h-2 rounded-full overflow-hidden bg-neutral-100">
-          <div
-            className={`h-full transition-all ${winner === "variant_a" && winningVariant === "variant_a" ? "bg-emerald-500" : "bg-blue-400"}`}
-            style={{ width: `${pctA}%` }}
-          />
-          <div
-            className={`h-full transition-all ${winner === "variant_b" && winningVariant === "variant_b" ? "bg-emerald-500" : "bg-violet-400"}`}
-            style={{ width: `${pctB}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-xs font-medium mt-1">
-          <span className={winningVariant === "variant_a" ? "text-emerald-700" : "text-neutral-400"}>{pctA}%</span>
-          <span className={winningVariant === "variant_b" ? "text-emerald-700" : "text-neutral-400"}>{pctB}%</span>
-        </div>
-      </div>
-
-      {/* Visual impact scores */}
-      {(avgImpact["variant_a"] || avgImpact["variant_b"]) ? (
-        <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-2 text-xs">
-          {(["variant_a", "variant_b"] as const).map((v) => (
-            <div key={v}>
-              <div className="text-neutral-400 mb-0.5">{v === "variant_a" ? "A" : "B"} visual</div>
-              <div className="flex items-center gap-1.5">
-                <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-400 rounded-full" style={{ width: `${((avgImpact[v] || 0) / 10) * 100}%` }} />
-                </div>
-                <span className="font-medium text-neutral-700 w-6 text-right">{avgImpact[v] ?? "—"}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {/* Fogg scores */}
-      {fogg && (fogg.motivation > 0 || fogg.ability > 0) && (
-        <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <div className="text-neutral-400 mb-0.5">Motivation</div>
-            <div className="flex items-center gap-1.5">
-              <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-400 rounded-full" style={{ width: `${(fogg.motivation / 10) * 100}%` }} />
-              </div>
-              <span className="font-medium text-neutral-700 w-6 text-right">{fogg.motivation}</span>
-            </div>
+      {/* Vote bar — hidden in single-screen mode */}
+      {!isSingleScreen && (
+        <div className="px-4 pt-3 pb-1">
+          <div className="flex items-center justify-between text-xs text-neutral-500 mb-1">
+            <span>Variant A</span>
+            <span className="font-medium text-neutral-800">{results.length} agent{results.length !== 1 ? "s" : ""}</span>
+            <span>Variant B</span>
           </div>
-          <div>
-            <div className="text-neutral-400 mb-0.5">Ability</div>
-            <div className="flex items-center gap-1.5">
-              <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                <div className="h-full bg-violet-400 rounded-full" style={{ width: `${(fogg.ability / 10) * 100}%` }} />
-              </div>
-              <span className="font-medium text-neutral-700 w-6 text-right">{fogg.ability}</span>
-            </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-neutral-100">
+            <div
+              className={`h-full transition-all ${winner === "variant_a" && winningVariant === "variant_a" ? "bg-emerald-500" : "bg-blue-400"}`}
+              style={{ width: `${pctA}%` }}
+            />
+            <div
+              className={`h-full transition-all ${winner === "variant_b" && winningVariant === "variant_b" ? "bg-emerald-500" : "bg-violet-400"}`}
+              style={{ width: `${pctB}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-xs font-medium mt-1">
+            <span className={winningVariant === "variant_a" ? "text-emerald-700" : "text-neutral-400"}>{pctA}%</span>
+            <span className={winningVariant === "variant_b" ? "text-emerald-700" : "text-neutral-400"}>{pctB}%</span>
           </div>
         </div>
       )}
 
-      {/* Attention path */}
-      {attentionPath.length > 0 && (
-        <div className="px-4 py-2 border-t border-neutral-100">
-          <div className="text-xs text-neutral-400 mb-1.5">Noticed in order</div>
-          <div className="flex flex-wrap gap-1">
-            {attentionPath.map((el, i) => (
-              <span key={i} className="flex items-center gap-1 text-xs bg-neutral-50 border border-neutral-200 px-2 py-0.5 rounded-full">
-                <span className="text-neutral-400 text-[10px]">{i + 1}</span>
-                {el}
-              </span>
-            ))}
-          </div>
+      {/* Resonance dimensions — all 6 */}
+      {hasDims && (
+        <div className="px-4 py-2 border-t border-neutral-100 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          {DIM_ORDER.filter((d) => dims[d] != null).map((dim) => {
+            const meta = RESONANCE_META[dim];
+            const score = dims[dim];
+            return (
+              <div key={dim}>
+                <Tip text={meta?.tooltip ?? dim}>
+                  <div className="text-neutral-400 mb-0.5 cursor-help underline decoration-dotted decoration-neutral-300 inline-block">
+                    {meta?.label ?? dim}
+                  </div>
+                </Tip>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${meta?.color ?? "bg-neutral-400"}`}
+                      style={{ width: `${(score / 10) * 100}%` }}
+                    />
+                  </div>
+                  <span className="font-medium text-neutral-700 w-6 text-right">{score}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -232,14 +256,6 @@ export default function PersonaCard({ persona, results, winner }: Props) {
           </div>
         </div>
       )}
-
-      {/* Messaging alignment */}
-      {topAlignment && (
-        <div className="px-4 py-2 border-t border-neutral-100 flex items-center gap-2">
-          <span className="text-xs text-neutral-400">Messaging</span>
-          <AlignmentBadge value={topAlignment} />
-        </div>
-      )}
     </div>
   );
 }
@@ -248,24 +264,6 @@ function Badge({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 whitespace-nowrap">
       {children}
-    </span>
-  );
-}
-
-function AlignmentBadge({ value }: { value: string }) {
-  const styles: Record<string, string> = {
-    strong: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    moderate: "bg-amber-50 text-amber-700 border-amber-200",
-    weak: "bg-red-50 text-red-700 border-red-200",
-  };
-  const labels: Record<string, string> = {
-    strong: "✓ Strong match",
-    moderate: "~ Moderate match",
-    weak: "✗ Weak match",
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-medium ${styles[value] || ""}`}>
-      {labels[value] || value}
     </span>
   );
 }

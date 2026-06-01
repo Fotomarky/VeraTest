@@ -1,30 +1,35 @@
-"""Synthesizer — produces the final weighted narrative.
+"""Synthesizer v0.3 — cohort-resonance aggregation.
 
-Reads all sim results + the audit, computes weighted vote (by scenario
-traffic_weight, not raw count), clusters friction themes, and writes the
-final user-facing Synthesis to shared state.
+Replaces the vote-based winner with a gap-and-significance verdict:
+- compute mean resonance vector per cohort
+- collapse to overall via RESONANCE_WEIGHTS
+- declare a directional winner only if the gap is large enough vs. pooled noise
+- friction clustering partitions by cohort (losing/winning)
+- per-persona resonance matrix kept for the diagnostic heatmap
 """
 from __future__ import annotations
 import logging
-from collections import defaultdict
+import math
+from collections import Counter, defaultdict
 
 from .. import state
 from ..llm import MODEL_FLASH, generate
-from ..models import FrictionTheme, ScenarioCard, SimResult, Synthesis
+from ..models import (
+    FrictionTheme, RESONANCE_DIMS, RESONANCE_WEIGHTS, ScenarioCard, SimResult, Synthesis,
+)
 
 log = logging.getLogger(__name__)
 
 
 CLUSTER_PROMPT = """\
-Below are friction points reported by simulated users evaluating a landing page.
+Below are {kind} reported by simulated users evaluating a landing page.
 Cluster them into 3-5 distinct themes. Each theme should be specific and
 actionable (not generic like "page is bad").
 
-For each theme, also pick 1-2 example quotes from the raw list that best
-illustrate it.
+For each theme, pick 1-2 example quotes from the raw list that best illustrate it.
 
-FRICTION POINTS (one per line, possibly with duplicates):
-{friction_lines}
+{kind} (one per line, possibly with duplicates):
+{lines}
 
 Respond with ONLY a JSON object:
 {{
@@ -37,61 +42,163 @@ Respond with ONLY a JSON object:
     }}
   ]
 }}
-Severity = high if the theme caused would_bounce outcomes, medium if would_research_more,
-low if just minor friction.
+Severity = high if the theme would block conversion, medium if it would slow
+research, low if it is just minor friction.
 """
 
 
 SUMMARY_PROMPT = """\
-Write a 1-sentence executive summary and a 2-sentence recommendation given
-this result.
+Write a one-sentence executive summary and a 2-sentence recommendation for this
+A/B pretest result.
 
-WINNER: {winner}
-WEIGHTED VOTE: {weighted_vote}
-TRUST LEVEL: {trust}
+DIRECTIONAL WINNER:  {winner}
+RESONANCE GAP:       {gap:+.2f} (variant_b minus variant_a, on a 1-10 scale)
+GAP SIGNIFICANCE:    {significance}
+TRUST LEVEL:         {trust}
+COHORT OVERALL:      variant_a = {a_overall:.2f}, variant_b = {b_overall:.2f}
+TOP FRICTION THEMES (in the losing variant):
+{themes}
+
+Phrase carefully: this measures persona-page RESONANCE, which is a necessary
+but not sufficient condition for conversion. Do NOT claim a predicted
+conversion rate. Use language like "directionally favors X" or "resonates
+more strongly with Y persona".
+
+Respond with ONLY: {{"one_line": "...", "recommendation": "..."}}
+"""
+
+SINGLE_SCREEN_SUMMARY_PROMPT = """\
+Write a one-sentence executive summary and a 2-sentence recommendation for this
+single-design UX analysis.
+
+OVERALL RESONANCE:   {overall:.2f}/10 (persona-page fit score, 1-10 scale)
+TRUST LEVEL:         {trust}
 TOP FRICTION THEMES:
 {themes}
+
+Phrase carefully: this measures persona-page RESONANCE for a single design —
+it is NOT a conversion rate prediction. Focus on what to improve. Use language
+like "the design resonates at {overall:.1f}/10 overall" and "key friction is...".
 
 Respond with ONLY: {{"one_line": "...", "recommendation": "..."}}
 """
 
 
-def _weight_lookup(scenarios: list[ScenarioCard]) -> dict[str, float]:
-    """Map scenario_id → traffic_weight (used by all aggregation functions)."""
-    return {sc.id: sc.traffic_weight for sc in scenarios}
+TIE_GAP_FLOOR = 0.3        # absolute |gap| below this -> tie regardless of std
+STRONG_GAP_FLOOR = 0.8     # absolute |gap| floor for "strong" significance
 
 
-def _compute_votes(
-    results: list[SimResult], weights: dict[str, float]
-) -> tuple[dict[str, int], dict[str, float]]:
-    raw: dict[str, int] = defaultdict(int)
-    weighted: dict[str, float] = defaultdict(float)
+# ---------------------------------------------------------------------------
+# Aggregation helpers
+# ---------------------------------------------------------------------------
+
+def _partition_by_cohort(results: list[SimResult]) -> dict[str, list[SimResult]]:
+    out: dict[str, list[SimResult]] = {"variant_a": [], "variant_b": []}
     for r in results:
-        raw[r.verdict] += 1
-        w = weights.get(r.scenario_id, 1.0 / len(results))
-        weighted[r.verdict] += w
-    total_w = sum(weighted.values()) or 1.0
-    weighted_norm = {k: round(v / total_w, 3) for k, v in weighted.items()}
-    return dict(raw), weighted_norm
+        out[r.cohort].append(r)
+    return out
 
 
-def _winner(weighted: dict[str, float]) -> str:
-    """Pick winner from weighted vote, ignoring neither/needs_more_info."""
-    candidates = {
-        k: v for k, v in weighted.items()
-        if k in ("variant_a", "variant_b")
-    }
-    if not candidates:
-        return "neither"
-    # If margin is tiny (<5pp), call it neither
-    sorted_v = sorted(candidates.values(), reverse=True)
-    if len(sorted_v) >= 2 and sorted_v[0] - sorted_v[1] < 0.05:
-        return "neither"
-    return max(candidates, key=candidates.get)
+def _cohort_resonance(by_cohort: dict[str, list[SimResult]]) -> dict[str, dict[str, float]]:
+    """{cohort: {dim: mean_score}} per dim."""
+    out: dict[str, dict[str, float]] = {}
+    for cohort, items in by_cohort.items():
+        if not items:
+            out[cohort] = {dim: 0.0 for dim in RESONANCE_DIMS}
+            continue
+        dim_means: dict[str, float] = {}
+        for dim in RESONANCE_DIMS:
+            scores = [r.resonance.get(dim, 5) for r in items]
+            dim_means[dim] = round(sum(scores) / len(scores), 2)
+        out[cohort] = dim_means
+    return out
+
+
+def _cohort_overall(cohort_res: dict[str, dict[str, float]]) -> dict[str, float]:
+    """Weighted mean across dims using RESONANCE_WEIGHTS."""
+    out: dict[str, float] = {}
+    for cohort, dim_means in cohort_res.items():
+        total_w = sum(RESONANCE_WEIGHTS.get(d, 0) for d in dim_means)
+        if total_w == 0:
+            out[cohort] = 0.0
+            continue
+        weighted = sum(dim_means[d] * RESONANCE_WEIGHTS.get(d, 0) for d in dim_means)
+        out[cohort] = round(weighted / total_w, 2)
+    return out
+
+
+def _pop_variance(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    mean = sum(values) / len(values)
+    return sum((v - mean) ** 2 for v in values) / len(values)
+
+
+def _pooled_std(by_cohort: dict[str, list[SimResult]]) -> float:
+    """sqrt of mean of within-cohort variances on resonance_overall."""
+    vars_ = []
+    for items in by_cohort.values():
+        if items:
+            vars_.append(_pop_variance([r.resonance_overall for r in items]))
+    if not vars_:
+        return 0.0
+    return math.sqrt(sum(vars_) / len(vars_))
+
+
+def _verdict(gap: float, pooled_std: float) -> tuple[str, str]:
+    """Returns (directional_winner, gap_significance)."""
+    abs_gap = abs(gap)
+    if abs_gap < TIE_GAP_FLOOR or abs_gap < pooled_std:
+        return "tie", "tie"
+    winner = "variant_b" if gap > 0 else "variant_a"
+    if abs_gap > 1.5 * pooled_std and abs_gap > STRONG_GAP_FLOOR:
+        return winner, "strong"
+    if abs_gap > pooled_std:
+        return winner, "moderate"
+    return winner, "weak"
+
+
+def _per_persona_resonance(
+    results: list[SimResult],
+) -> dict[str, dict[str, dict[str, float]]]:
+    """{segment: {variant_a/b: {dim: mean_score}}}"""
+    buckets: dict[str, dict[str, list[SimResult]]] = defaultdict(
+        lambda: {"variant_a": [], "variant_b": []}
+    )
+    for r in results:
+        buckets[r.scenario_segment][r.cohort].append(r)
+
+    out: dict[str, dict[str, dict[str, float]]] = {}
+    for segment, by_cohort in buckets.items():
+        out[segment] = {}
+        for cohort, items in by_cohort.items():
+            if not items:
+                continue
+            dim_means: dict[str, float] = {}
+            for dim in RESONANCE_DIMS:
+                scores = [r.resonance.get(dim, 5) for r in items]
+                dim_means[dim] = round(sum(scores) / len(scores), 2)
+            out[segment][cohort] = dim_means
+    return out
+
+
+def _segment_splits(results: list[SimResult]) -> dict[str, dict[str, float]]:
+    """{segment: {variant_a: overall_mean, variant_b: overall_mean}}"""
+    buckets: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {"variant_a": [], "variant_b": []}
+    )
+    for r in results:
+        buckets[r.scenario_segment][r.cohort].append(r.resonance_overall)
+    out: dict[str, dict[str, float]] = {}
+    for segment, by_cohort in buckets.items():
+        out[segment] = {
+            cohort: round(sum(scores) / len(scores), 2) if scores else 0.0
+            for cohort, scores in by_cohort.items()
+        }
+    return out
 
 
 def _coverage_score(scenarios: list[ScenarioCard], results: list[SimResult]) -> int:
-    """0-100 score based on segment + device + decision-style diversity."""
     if not results:
         return 0
     n = len(results)
@@ -102,87 +209,7 @@ def _coverage_score(scenarios: list[ScenarioCard], results: list[SimResult]) -> 
     return min(100, int(diversity * 100))
 
 
-def _segment_split_pct(results: list[SimResult]) -> dict[str, dict[str, float]]:
-    """{segment: {variant_a: 0.7, variant_b: 0.3, ...}}"""
-    out: dict[str, dict[str, float]] = {}
-    by_seg: dict[str, list[SimResult]] = defaultdict(list)
-    for r in results:
-        by_seg[r.scenario_segment].append(r)
-    for seg, items in by_seg.items():
-        votes: dict[str, int] = defaultdict(int)
-        for r in items:
-            votes[r.verdict] += 1
-        total = len(items)
-        out[seg] = {k: round(v / total, 3) for k, v in votes.items()}
-    return out
-
-
-def _compute_visual_impact(
-    results: list[SimResult], weights: dict[str, float]
-) -> dict[str, float]:
-    """Weighted average visual_impact score per variant.
-
-    Returns {"variant_a": 6.8, "variant_b": 7.2}. Returns 0.0 where no
-    agent reported a score (backward compat with pre-v0.2 runs).
-    """
-    totals: dict[str, float] = {"variant_a": 0.0, "variant_b": 0.0}
-    weight_sums: dict[str, float] = {"variant_a": 0.0, "variant_b": 0.0}
-    for r in results:
-        w = weights.get(r.scenario_id, 1.0 / max(len(results), 1))
-        for variant, score in r.visual_impact.items():
-            if variant in totals:
-                totals[variant] += float(score) * w
-                weight_sums[variant] += w
-    return {
-        v: round(totals[v] / weight_sums[v], 1) if weight_sums[v] > 0 else 0.0
-        for v in ("variant_a", "variant_b")
-    }
-
-
-def _compute_fogg_averages(
-    results: list[SimResult], weights: dict[str, float]
-) -> dict[str, dict[str, float]]:
-    """Weighted-average Fogg B=MAP scores grouped by the variant each agent chose.
-
-    Returns:
-      {
-        "variant_a": {"motivation": 6.2, "ability": 5.0},
-        "variant_b": {"motivation": 7.1, "ability": 8.3},
-      }
-    Agents that voted "neither" or "needs_more_info" are excluded.
-    """
-    buckets: dict[str, dict[str, list[tuple[float, float]]]] = {
-        "variant_a": {"motivation": [], "ability": []},
-        "variant_b": {"motivation": [], "ability": []},
-    }
-    for r in results:
-        if r.verdict not in buckets:
-            continue
-        w = weights.get(r.scenario_id, 1.0 / max(len(results), 1))
-        if r.fogg_motivation > 0:
-            buckets[r.verdict]["motivation"].append((r.fogg_motivation, w))
-        if r.fogg_ability > 0:
-            buckets[r.verdict]["ability"].append((r.fogg_ability, w))
-
-    out: dict[str, dict[str, float]] = {}
-    for variant, dims in buckets.items():
-        agg: dict[str, float] = {}
-        for dim, pairs in dims.items():
-            if pairs:
-                total = sum(v * w for v, w in pairs)
-                wsum = sum(w for _, w in pairs)
-                agg[dim] = round(total / wsum, 1) if wsum > 0 else 0.0
-        if agg:
-            out[variant] = agg
-    return out
-
-
 def _collect_trust_gaps(results: list[SimResult]) -> list[str]:
-    """Return trust signals most commonly reported as MISSING, sorted by frequency.
-
-    Returns the top 5 gaps as a list of strings.
-    """
-    from collections import Counter
     counter: Counter[str] = Counter()
     for r in results:
         for signal in r.trust_signals_missing:
@@ -192,23 +219,26 @@ def _collect_trust_gaps(results: list[SimResult]) -> list[str]:
     return [item for item, _ in counter.most_common(5)]
 
 
-async def _cluster_friction(results: list[SimResult], kind: str = "friction_points") -> list[FrictionTheme]:
-    """Cluster friction_points or what_worked into themes via one LLM call."""
+async def _cluster_friction(
+    items: list[SimResult],
+    field: str,
+    kind_label: str,
+) -> list[FrictionTheme]:
+    """One LLM call to cluster either friction_points or what_worked into themes."""
     lines = []
-    for r in results:
-        for f in getattr(r, kind):
+    for r in items:
+        for f in getattr(r, field):
             lines.append(f"- {f}")
     if not lines:
         return []
-
     raw = await generate(
         model=MODEL_FLASH,
-        prompt=CLUSTER_PROMPT.format(friction_lines="\n".join(lines[:200])),
+        prompt=CLUSTER_PROMPT.format(kind=kind_label, lines="\n".join(lines[:200])),
         response_schema={},
         temperature=0.2,
     )
     themes_data = raw.get("themes", [])
-    themes = []
+    themes: list[FrictionTheme] = []
     for t in themes_data:
         try:
             themes.append(FrictionTheme(
@@ -222,6 +252,10 @@ async def _cluster_friction(results: list[SimResult], kind: str = "friction_poin
     return sorted(themes, key=lambda t: t.count, reverse=True)
 
 
+# ---------------------------------------------------------------------------
+# Main entry
+# ---------------------------------------------------------------------------
+
 async def run(run_id: str) -> Synthesis:
     run = await state.get_run(run_id)
     if run is None or run.audit is None:
@@ -229,60 +263,95 @@ async def run(run_id: str) -> Synthesis:
 
     await state.set_status(run_id, "synthesizing")
 
-    weights = _weight_lookup(run.scenarios)
-    raw_vote, weighted_vote = _compute_votes(run.simulation_results, weights)
-    winner = _winner(weighted_vote)
+    results = run.simulation_results
+    single_screen = not run.variant_b_path
 
-    # Filter friction to the LOSING variant's reports (most actionable)
-    losing = "variant_a" if winner == "variant_b" else "variant_b"
-    losing_results = [r for r in run.simulation_results if r.verdict == winner]
-    top_friction = await _cluster_friction(losing_results, "friction_points")
-    worked_themes = await _cluster_friction(
-        [r for r in run.simulation_results if r.verdict == winner], "what_worked"
-    )
-
-    coverage = _coverage_score(run.scenarios, run.simulation_results)
-    segments = _segment_split_pct(run.simulation_results)
-
-    weights = _weight_lookup(run.scenarios or [])
-    visual_impact = _compute_visual_impact(run.simulation_results, weights)
-    fogg_avg = _compute_fogg_averages(run.simulation_results, weights)
-    trust_signal_gaps = _collect_trust_gaps(run.simulation_results)
+    by_cohort = _partition_by_cohort(results)
+    per_persona = _per_persona_resonance(results)
+    segments = _segment_splits(results)
+    coverage = _coverage_score(run.scenarios, results)
+    trust_gaps = _collect_trust_gaps(results)
 
     confound_warning: str | None = None
     if run.brief and run.brief.needs_clarification and run.brief.notes:
         confound_warning = run.brief.notes
 
-    # One-line summary + recommendation
-    summary_raw = await generate(
-        model=MODEL_FLASH,
-        prompt=SUMMARY_PROMPT.format(
-            winner=winner,
-            weighted_vote=weighted_vote,
-            trust=run.audit.trust_level,
-            themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]),
-        ),
-        response_schema={},
-        temperature=0.4,
-    )
+    if single_screen:
+        # Single-screen: only variant_a cohort exists; no comparison possible.
+        cohort_res = _cohort_resonance({"variant_a": results})
+        cohort_overall = _cohort_overall(cohort_res)
+        gap = 0.0
+        directional_winner, gap_significance = "tie", "tie"
+        pooled = 0.0
+
+        top_friction = await _cluster_friction(results, "friction_points", "FRICTION POINTS")
+        worked_themes = await _cluster_friction(results, "what_worked", "WHAT WORKED")
+
+        overall_score = cohort_overall.get("variant_a", 0.0)
+        summary_raw = await generate(
+            model=MODEL_FLASH,
+            prompt=SINGLE_SCREEN_SUMMARY_PROMPT.format(
+                overall=overall_score,
+                trust=run.audit.trust_level,
+                themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
+            ),
+            response_schema={},
+            temperature=0.4,
+        )
+    else:
+        cohort_res = _cohort_resonance(by_cohort)
+        cohort_overall = _cohort_overall(cohort_res)
+        gap = round(cohort_overall.get("variant_b", 0.0) - cohort_overall.get("variant_a", 0.0), 3)
+        pooled = _pooled_std(by_cohort)
+        directional_winner, gap_significance = _verdict(gap, pooled)
+
+        if directional_winner == "tie":
+            losing_items = results
+            winning_items = results
+        else:
+            winning_items = by_cohort[directional_winner]
+            losing_items = by_cohort[
+                "variant_a" if directional_winner == "variant_b" else "variant_b"
+            ]
+        top_friction = await _cluster_friction(losing_items, "friction_points", "FRICTION POINTS")
+        worked_themes = await _cluster_friction(winning_items, "what_worked", "WHAT WORKED")
+
+        summary_raw = await generate(
+            model=MODEL_FLASH,
+            prompt=SUMMARY_PROMPT.format(
+                winner=directional_winner,
+                gap=gap,
+                significance=gap_significance,
+                trust=run.audit.trust_level,
+                a_overall=cohort_overall.get("variant_a", 0.0),
+                b_overall=cohort_overall.get("variant_b", 0.0),
+                themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
+            ),
+            response_schema={},
+            temperature=0.4,
+        )
 
     synthesis = Synthesis(
-        winner=winner,
-        raw_vote=raw_vote,
-        weighted_vote=weighted_vote,
+        cohort_resonance=cohort_res,
+        cohort_resonance_overall=cohort_overall,
+        resonance_gap=gap,
+        directional_winner=directional_winner,
+        gap_significance=gap_significance,
+        per_persona_resonance=per_persona,
         coverage_score=coverage,
         top_friction=top_friction[:5],
         what_worked_themes=worked_themes[:5],
         segment_splits=segments,
         recommendation=summary_raw.get("recommendation", ""),
         one_line_summary=summary_raw.get("one_line", ""),
-        visual_impact=visual_impact,
         confound_warning=confound_warning,
-        fogg_avg=fogg_avg,
-        trust_signal_gaps=trust_signal_gaps,
+        trust_signal_gaps=trust_gaps,
     )
 
     await state.write_synthesis(run_id, synthesis)
-    log.info(f"[{run_id}] synthesizer: winner={winner} coverage={coverage} "
-             f"themes={len(top_friction)}")
+    log.info(
+        f"[{run_id}] synthesizer: winner={directional_winner} sig={gap_significance} "
+        f"gap={gap:+.2f} pooled_std={pooled:.2f} a={cohort_overall.get('variant_a', 0):.2f} "
+        f"b={cohort_overall.get('variant_b', 0):.2f} coverage={coverage}"
+    )
     return synthesis

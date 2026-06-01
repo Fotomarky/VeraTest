@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import state
-from .agents import auditor, normalizer, scenarios, simulator, synthesizer
+from . import ratelimit, state
+from .agents import (
+    auditor, fidelity, narrative, normalizer, scenarios, simulator, synthesizer,
+)
 from .config import CONFIG
+from .integrations.session import run_session
 
 log = logging.getLogger(__name__)
 
@@ -45,17 +48,22 @@ async def run_pipeline(run_id: str) -> None:
     """Top-level entrypoint. Runs the five phases sequentially."""
     log.info(f"[{run_id}] pipeline start")
     try:
-        await normalizer.run(run_id)
-        await scenarios.run(run_id)
-        await _run_simulators(run_id)
-        await auditor.run(run_id)
-        await synthesizer.run(run_id)
+        with run_session(run_id):
+            await normalizer.run(run_id)
+            await scenarios.run(run_id)
+            await _run_simulators(run_id)
+            await auditor.run(run_id)
+            await synthesizer.run(run_id)
+            await narrative.run(run_id)
+            await fidelity.run(run_id)  # Phase 7 — owns the terminal status
         log.info(f"[{run_id}] pipeline complete")
         await _notify_completion(run_id)
     except Exception as e:
         log.exception(f"[{run_id}] pipeline failed: {e}")
         await state.set_status(run_id, "failed", error=str(e))
         raise
+    finally:
+        ratelimit.notify_run_finished()
 
 
 async def _notify_completion(run_id: str) -> None:
