@@ -34,7 +34,7 @@ phoenix = [
     "openinference-instrumentation>=0.1",
     "openinference-instrumentation-google-genai>=0.1",
 ]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "anyio>=4.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "anyio>=4.0", "pandas>=2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
