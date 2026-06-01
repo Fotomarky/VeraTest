@@ -45,7 +45,11 @@ def init_phoenix() -> bool:
             auto_instrument=False,
         )
         if CONFIG.phoenix_api_key:
-            register_kwargs["headers"] = {"api_key": CONFIG.phoenix_api_key}
+            # Phoenix Cloud authenticates via standard OTLP Bearer header,
+            # not a custom `api_key` field.
+            register_kwargs["headers"] = {
+                "authorization": f"Bearer {CONFIG.phoenix_api_key}",
+            }
         tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
         _initialized = True
