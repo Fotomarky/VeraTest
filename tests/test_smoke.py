@@ -207,3 +207,34 @@ def test_run_status_includes_narrating_and_calibrating():
         run = Run(run_id=f"r_{status}", goal="g",
                   variant_a_path="/x.png", status=status)
         assert run.status == status
+
+
+@pytest.mark.asyncio
+async def test_write_fidelity_persists_slice(tmp_path, monkeypatch):
+    """write_fidelity round-trips through SQLite."""
+    monkeypatch.setenv("SIMAB_DB_PATH", str(tmp_path / "test.db"))
+    # Reload CONFIG so the new db_path is picked up.
+    import importlib
+    from simab import config as _config_mod
+    importlib.reload(_config_mod)
+    from simab import state as _state_mod
+    importlib.reload(_state_mod)
+    from simab.models import FidelityReport
+
+    rid = await _state_mod.create_run(
+        goal="g", audience_raw="a", persona_source="paste",
+        variant_a_path="/x.png", variant_b_path=None,
+    )
+    fr = FidelityReport(
+        persona_consistency=0.95, agents_drifted=1,
+        rationale_coherence=0.9, agents_incoherent=2,
+    )
+    await _state_mod.write_fidelity(rid, fr)
+
+    run = await _state_mod.get_run(rid)
+    assert run is not None
+    assert run.fidelity is not None
+    assert run.fidelity.persona_consistency == 0.95
+    assert run.fidelity.agents_drifted == 1
+    assert run.fidelity.agents_incoherent == 2
+    await _state_mod.close_db()
