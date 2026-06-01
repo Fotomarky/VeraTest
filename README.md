@@ -67,43 +67,116 @@ Every run produces a **PM Command Center** — a single-page report structured a
 
 ---
 
+## Why this works
+
+VeraTest doesn't invent a methodology. It digitizes one. Every layer in the pipeline maps to an established practice from UX research, cognitive science, or experimental design — fields with decades of evidence behind them. The question isn't whether the methodology is sound. It's whether AI agents can execute it faithfully enough to be useful.
+
+### 1. The methodology is established
+
+**Multiple independent evaluators beat any single expert.** Nielsen (1994) demonstrated that 5 independent evaluators find ~80% of usability issues; 15 find ~90%. Condorcet's jury theorem formalizes why: independent judges with better-than-random individual accuracy converge on the correct answer as panel size grows. VeraTest uses 20 — each constrained to a different persona, eliminating the groupthink that a single LLM call would produce.
+
+**Structured evaluation outperforms open-ended preference.** Decades of industrial/organizational psychology show that structured interviews predict outcomes 2× better than unstructured ones (Schmidt & Hunter, 1998). The same principle applies to design evaluation. Asking "which is better?" produces confident noise. Walking through a defined protocol — visual impact, scanning path, trust signals, cognitive load — produces diagnostics.
+
+**System 1 → System 2 progression mirrors real cognition.** Kahneman's dual-process theory isn't a hypothesis — it's textbook cognitive science. Humans process a landing page in two distinct phases: fast visual/emotional reaction (System 1), then slow deliberate reading and decision-making (System 2). VeraTest's Cognitive Walkers follow this sequence because that's how brains actually process a page, not because it's a convenient architecture choice.
+
+**The Fogg Behavior Model (B = MAP) drives the decision layer.** One of the most cited frameworks in persuasive design: Behavior = Motivation × Ability × Trigger. VeraTest's six resonance dimensions extend Fogg with Identity (Social Identity Theory), Situation (Situated Cognition), and Beliefs (Cognitive Dissonance Theory) — producing a richer diagnostic than any single framework alone.
+
+**Counterbalancing and confound detection are Experimental Design 101.** Showing Variant A first to half the panel and B first to the other half is the minimum methodological standard for any comparison study. Rejecting tests where both variants differ in language, brand, and layout simultaneously is what any research director or IRB would do. Most AI evaluation tools skip both. VeraTest does neither.
+
+### 2. LLM persona simulation is emerging but credible
+
+Can language models actually simulate how different people evaluate a design? The evidence is early but directional:
+
+- **Argyle et al. (2023), "Out of One, Many"** — demonstrated that LLMs can reproduce demographic subgroups' survey responses with surprising accuracy across age, income, and political affiliation. The paper calls this "silicon sampling."
+- **Aher et al. (2023), "Using LLMs to Simulate Multiple Humans"** — replicated classic behavioral experiments (ultimatum game, Milgram-style studies) using LLM personas and got results that matched original human data.
+- **Park et al. (2023), "Generative Agents"** — 25 LLM agents in a simulated town exhibited emergent social behaviors that human evaluators rated as more human-like than actual human transcripts.
+
+VeraTest adds structural constraints that these papers identify as critical: persona locking (agents can't drift toward "helpful AI evaluator" mode), anti-cooperative prompting (agents are forced to behave like impatient, flawed humans), and metacognitive self-audit (agents check their own reasoning for persona leakage before submitting).
+
+### 3. This replaces guessing, not clinical trials
+
+AI persona simulation is not a replacement for real traffic data. It's a replacement for the alternative — which, for most teams, is a PM's intuition, a Slack poll, or shipping the founder's favorite and hoping for the best.
+
+The question isn't *"is this as reliable as a 50,000-visitor A/B test with 95% statistical significance?"* It's *"is this more reliable than no test at all?"* The methodology says yes. The emerging LLM research says yes. And VeraTest's own validation against known A/B outcomes provides a concrete accuracy number you can evaluate for yourself (see [Validation](#validation)).
+
+A $50,000 A/B test is more rigorous. But you need a live product, real traffic, and 4–6 weeks. VeraTest gives you a directional signal in 90 seconds, before you've written a single line of code for Variant B — so you can build the right variant and save the real test for final confirmation.
+
+---
+
 ## How the agent pipeline works
 
+Six agents, six phases. Each one mirrors a role in a professional usability study. Remove any layer and the results break in the same way a sloppy research study produces misleading data.
+
 ```
-Upload → BriefNormalizer → ScenarioBuilder → 20 × SimAgent → BiasAuditor → Synthesizer → NarrativeAgents (×3)
+Upload → Study Designer → Panel Recruiter → 20 × Cognitive Walkers → Bias Auditor → Insight Analyst → Report Narrators (×3)
 ```
 
-Six phases, all coordinating through a shared SQLite document — no framework, no LangGraph, no magic. Agents leave structured outputs that downstream agents read, like ants following pheromone trails.
+| Phase | Agent | Research equivalent | Model | What breaks without it |
+|---|---|---|---|---|
+| 1 | **Study Designer** | Research director who reads the brief | Gemini Flash | You test noise — confounded comparisons produce uninterpretable data |
+| 2 | **Panel Recruiter** | Recruiter assembling a representative panel | Gemini Flash | Niche 5% segments get equal voice to your core 60% audience |
+| 3 | **Cognitive Walker** ×20 | Moderated cognitive walkthrough session | Gemini Flash-Lite | You're asking "which do you prefer?" — confident noise, no diagnostics |
+| 4 | **Bias Auditor** | Methodologist checking data quality | Gemini Flash | Position effects silently corrupt your results |
+| 5 | **Insight Analyst** | Analyst synthesizing session transcripts | Gemini Flash | You have 20 opinions; opinions aren't findings |
+| 6 | **Report Narrator** ×3 | Research debrief writer | Gemini Flash | PMs get dashboards of numbers, not decisions for sprint planning |
 
-| Phase | Model | What it does |
+### Phase 1 · Study Designer
+
+Before a single agent evaluates your design, the Study Designer reads your image(s), extracts who your audience actually is, and checks for confounds. Different languages between variants? Different brand names? More than three simultaneous changes? It flags the test as uninterpretable — before you waste 20 evaluations on a comparison that can't produce a valid result.
+
+### Phase 2 · Panel Recruiter
+
+Builds 20 persona cards — each with a specific segment, intent, decision style, patience threshold, and device. Allocates agents proportionally to each segment's traffic weight using the largest-remainder method. A segment representing 40% of your traffic gets 40% of your evaluators. The synthesis reflects your actual audience, not an equal-weighted fiction.
+
+### Phase 3 · Cognitive Walkers (×20, parallel)
+
+The core of VeraTest. Each Cognitive Walker embodies one persona and evaluates your design through a structured cognitive sequence:
+
+| Step | Cognitive mode | What the agent does |
 |---|---|---|
-| **BriefNormalizer** | Gemini 2.5 Flash | Reads your image(s), extracts personas, detects confounded tests |
-| **ScenarioBuilder** | Gemini 2.5 Flash | Builds 20 micro-varied persona cards, allocates agents by traffic weight |
-| **20 × SimAgent** | Gemini 2.5 Flash-Lite | Each agent embodies one persona, evaluates one variant, scores 6 resonance dimensions |
-| **BiasAuditor** | Gemini 2.5 Flash | Checks cohort balance, score inflation, rationale coherence |
-| **Synthesizer** | Gemini 2.5 Flash | Clusters friction themes, computes gap, sets directional verdict |
-| **NarrativeAgents** | Gemini 2.5 Flash | 3 parallel sub-agents: structural diff, hypothesis pros/cons, cohort story |
+| Identity anchoring | Pre-evaluation | Locks to the persona: "What kind of person am I? What situation am I arriving from?" |
+| Gut reaction | System 1 | Rates visual impact, reads spatial hierarchy. First impressions form in <500ms. |
+| Scanning | System 1 | Follows the eye path dictated by decision style — F-pattern (analytical), Z-pattern (impulse), trust-first (cautious). |
+| Deliberate evaluation | System 2 | Reads messaging, checks trust signals, scores alignment with existing beliefs. |
+| Decision | System 2 | Fogg model: B = Motivation × Ability × Trigger. Is the path clear enough for this persona's patience level? |
+| Self-audit | Metacognitive | "Could I be wrong? Am I responding as this persona, or as a helpful AI?" |
 
-### The six resonance dimensions
+Every agent scores six resonance dimensions, producing a diagnostic fingerprint rather than a blunt preference:
 
-Every SimAgent scores each design on six dimensions — replacing the blunt Fogg motivation/ability binary with a richer diagnostic:
+| Dimension | What it captures | Framework origin |
+|---|---|---|
+| **Motivation** | Does the design activate the right desire? | Fogg Behavior Model |
+| **Identity** | Does it speak to who they see themselves as? | Social Identity Theory |
+| **Situation** | Does it match the context they're arriving from? | Situated Cognition |
+| **Beliefs** | Does it align with what they already think is true? | Cognitive Dissonance Theory |
+| **Ability** | Is the path to action clear enough for their patience? | Fogg Behavior Model |
+| **Trigger** | Is the CTA well-timed and unmissable? | Fogg Behavior Model |
 
-| Dimension | What it captures |
+### Phase 4 · Bias Auditor
+
+Even-indexed agents see Variant A first; odd-indexed agents see Variant B first. The Bias Auditor checks whether the margin holds after controlling for presentation order. It also flags confidence collapse (suspiciously uniform scores), cohort imbalance, and rationale incoherence. If the result doesn't survive these checks, you see `trust_level: low` before the verdict — not after you've acted on it.
+
+### Phase 5 · Insight Analyst
+
+Takes 20 individual evaluations and produces findings: directional winner, resonance gap with significance assessment, friction themes clustered by severity and agent count, what-worked themes, trust signal gaps, and a single recommendation for what to fix first. Twenty opinions become one synthesis.
+
+### Phase 6 · Report Narrators (×3, parallel)
+
+Three parallel sub-agents each write one section of the PM report:
+
+| Narrator | What it produces |
 |---|---|
-| **Motivation** | Does the design activate the right desire for this persona? |
-| **Identity** | Does it speak to who they see themselves as? |
-| **Situation** | Does it match the context they're arriving from? |
-| **Beliefs** | Does it align with what they already think is true? |
-| **Ability** | Is the path to action clear enough for their patience level? |
-| **Trigger** | Is the call to action well-timed and hard to miss? |
+| **Structural Diff** | What's objectively different between the variants and how it maps to the resonance gap |
+| **Hypothesis** | The single highest-leverage thing to test next, with a projected improvement target |
+| **Cohort Story** | How each audience segment responded differently — the "why behind the why" |
 
 ### Position bias is controlled by design
 
-Even-indexed agents see Variant A first. Odd-indexed agents see Variant B first. The BiasAuditor then checks whether the gap holds after controlling for presentation order — if it doesn't, you get a `trust_level: low` warning before seeing the verdict.
+Even-indexed agents see Variant A first. Odd-indexed agents see Variant B first. The Bias Auditor then checks whether the gap holds after controlling for presentation order — if it doesn't, you get a `trust_level: low` warning before seeing the verdict.
 
 ### Confound detection before you waste agents
 
-The BriefNormalizer analyses your images before building scenarios. If it detects different brand names, different languages, or more than three simultaneous variables, it surfaces a `confound_warning` explaining exactly why the test is uninterpretable — before running 20 agents on a meaningless comparison.
+The Study Designer analyses your images before building scenarios. If it detects different brand names, different languages, or more than three simultaneous variables, it surfaces a `confound_warning` explaining exactly why the test is uninterpretable — before running 20 agents on a meaningless comparison.
 
 ---
 
@@ -114,7 +187,7 @@ docker run -p 6006:6006 -p 4317:4317 arizephoenix/phoenix:latest
 export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
 ```
 
-Every run produces ~24 spans in Phoenix — one per Gemini call. Full prompts, image payloads, responses, and timing. You can see exactly what the BriefNormalizer extracted, what each SimAgent decided and why, what the BiasAuditor flagged. No black box.
+Every run produces ~24 spans in Phoenix — one per Gemini call. Full prompts, image payloads, responses, and timing. You can see exactly what the Study Designer extracted, what each Cognitive Walker decided and why, what the Bias Auditor flagged. No black box.
 
 ---
 
@@ -168,12 +241,12 @@ curl -X POST http://localhost:8000/api/runs \
 ```
 simab/
 ├── agents/
-│   ├── normalizer.py    Phase 1 — image reading, persona extraction, confound detection
-│   ├── scenarios.py     Phase 2 — traffic-weighted allocation, 20 micro-varied cards
-│   ├── simulator.py     Phase 3 — 6-dimension resonance evaluation per persona
-│   ├── auditor.py       Phase 4 — cohort balance, score inflation, coherence checks
-│   ├── synthesizer.py   Phase 5 — friction clustering, gap computation, verdict
-│   └── narrative.py     Phase 6 — 3 parallel sub-agents: diff, hypothesis, cohort story
+│   ├── normalizer.py    Phase 1 · Study Designer — image reading, persona extraction, confound detection
+│   ├── scenarios.py     Phase 2 · Panel Recruiter — traffic-weighted allocation, 20 micro-varied cards
+│   ├── simulator.py     Phase 3 · Cognitive Walker (×20) — 6-dimension resonance evaluation per persona
+│   ├── auditor.py       Phase 4 · Bias Auditor — cohort balance, score inflation, coherence checks
+│   ├── synthesizer.py   Phase 5 · Insight Analyst — friction clustering, gap computation, verdict
+│   └── narrative.py     Phase 6 · Report Narrators (×3) — diff, hypothesis, cohort story
 ├── models.py            Pydantic schemas (single source of truth)
 ├── pipeline.py          Sequential orchestration with async parallel sim phase
 ├── state.py             SQLite WAL — distributed mutex for idempotent writes
@@ -203,8 +276,8 @@ frontend/
 
 | Component | Technology |
 |---|---|
-| Orchestration | Gemini 2.5 Flash (normalizer, scenarios, auditor, synthesizer, narrative) |
-| Simulation | Gemini 2.5 Flash-Lite (20 parallel sim agents — free tier: 1,500/day) |
+| Orchestration | Gemini 2.5 Flash (Study Designer, Panel Recruiter, Bias Auditor, Insight Analyst, Report Narrators) |
+| Simulation | Gemini 2.5 Flash-Lite (20 parallel Cognitive Walkers — free tier: 1,500/day) |
 | Observability | Arize Phoenix (OTLP — full prompt + image + response per span) |
 | Backend | FastAPI + aiosqlite + SQLite WAL |
 | Frontend | Next.js 14 App Router + Tailwind CSS |

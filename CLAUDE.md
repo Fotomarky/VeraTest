@@ -29,12 +29,12 @@ simab/                  Backend Python package (FastAPI)
   config.py             Env-var config (frozen dataclass)
   exports.py            Markdown, PM summary, standalone HTML share page
   agents/
-    normalizer.py       Phase 1: parse goal + audience + images → Brief
-    scenarios.py        Phase 2: Brief → 3-7 ScenarioCards + allocations
-    simulator.py        Phase 3: one ScenarioCard → SimResult (runs 20 in parallel)
-    auditor.py          Phase 4: all SimResults → AuditReport (bias checks)
-    synthesizer.py      Phase 5: SimResults + AuditReport → Synthesis (sets status=synthesizing)
-    narrative.py        Phase 6: 3 parallel sub-agents → structural_diff, hypothesis, cohort_narrative (sets status=complete)
+    normalizer.py       Phase 1 · Study Designer: parse goal + audience + images → Brief
+    scenarios.py        Phase 2 · Panel Recruiter: Brief → 3-7 ScenarioCards + allocations
+    simulator.py        Phase 3 · Cognitive Walker: one ScenarioCard → SimResult (runs 20 in parallel)
+    auditor.py          Phase 4 · Bias Auditor: all SimResults → AuditReport (bias checks)
+    synthesizer.py      Phase 5 · Insight Analyst: SimResults + AuditReport → Synthesis (sets status=synthesizing)
+    narrative.py        Phase 6 · Report Narrators: 3 parallel sub-agents → structural_diff, hypothesis, cohort_narrative (sets status=complete)
   integrations/
     slack.py            Optional: post completion to Slack webhook
 
@@ -69,22 +69,22 @@ docs/                   Architecture diagrams and extended reference
 **The key design invariant.** Every agent reads from and writes to the shared `Run` document in SQLite. No agent receives parameters from another agent directly. Agents coordinate by leaving structured outputs that downstream agents consume — like ant pheromones.
 
 ```
-Upload → BriefNormalizer → ScenarioBuilder → 20 × Simulator → BiasAuditor → Synthesizer → NarrativeAgents (×3)
-           writes brief      writes scenarios   writes SimResults  writes audit   writes synthesis  writes narrative, sets complete
+Upload → Study Designer → Panel Recruiter → 20 × Cognitive Walkers → Bias Auditor → Insight Analyst → Report Narrators (×3)
+           writes brief      writes scenarios     writes SimResults    writes audit    writes synthesis    writes narrative, sets complete
 ```
 
-Each agent only writes its own slice:
+Each agent only writes its own slice (display name → file):
 
-| Agent | Reads | Writes |
-|---|---|---|
-| `normalizer` | `goal`, `audience_raw`, images (1 or 2) | `run.brief`, `run.scenarios` (inferred_personas) |
-| `scenarios` | `run.brief` | `run.scenarios` (final), `run.agent_allocations` |
-| `simulator` | `run.scenarios[i]`, images | `run.simulation_results[i]` (idempotent upsert) |
-| `auditor` | `run.simulation_results` | `run.audit` |
-| `synthesizer` | `run.simulation_results`, `run.audit` | `run.synthesis`, sets status=**synthesizing** |
-| `narrative` (×3) | `run.synthesis`, images | `run.synthesis.{structural_diff,hypothesis_pros/cons,narrative}`, sets status=**complete** |
+| Agent | File | Reads | Writes |
+|---|---|---|---|
+| **Study Designer** | `normalizer.py` | `goal`, `audience_raw`, images (1 or 2) | `run.brief`, `run.scenarios` (inferred_personas) |
+| **Panel Recruiter** | `scenarios.py` | `run.brief` | `run.scenarios` (final), `run.agent_allocations` |
+| **Cognitive Walker** ×20 | `simulator.py` | `run.scenarios[i]`, images | `run.simulation_results[i]` (idempotent upsert) |
+| **Bias Auditor** | `auditor.py` | `run.simulation_results` | `run.audit` |
+| **Insight Analyst** | `synthesizer.py` | `run.simulation_results`, `run.audit` | `run.synthesis`, sets status=**synthesizing** |
+| **Report Narrators** ×3 | `narrative.py` | `run.synthesis`, images | `run.synthesis.{structural_diff,hypothesis_pros/cons,narrative}`, sets status=**complete** |
 
-**Single-screen mode:** when `variant_b_path` is absent (`None` / `""`), the pipeline skips cohort splitting. All 20 sim agents evaluate `variant_a`; `directional_winner` is forced to `"tie"`; the auditor skips cohort imbalance checks; the synthesizer uses `SINGLE_SCREEN_SUMMARY_PROMPT`.
+**Single-screen mode:** when `variant_b_path` is absent (`None` / `""`), the pipeline skips cohort splitting. All 20 Cognitive Walkers evaluate `variant_a`; `directional_winner` is forced to `"tie"`; the Bias Auditor skips cohort imbalance checks; the Insight Analyst uses `SINGLE_SCREEN_SUMMARY_PROMPT`.
 
 **The open/closed rule:** each agent is open to extension (new fields, new heuristics) but closed to upstream changes. An agent must never modify another agent's slice of state.
 
@@ -124,9 +124,9 @@ Each agent only writes its own slice:
 
 | Model | Used for | Cost tier |
 |---|---|---|
-| `gemini-2.5-flash-lite` | 20 sim agents | Free tier: 30 RPM, 1500 RPD |
-| `gemini-2.5-flash` | normalizer + scenario builder | Free tier: 15 RPM, 500 RPD |
-| `gemini-2.5-flash` | auditor + synthesizer + narrative | Free tier: 15 RPM, 500 RPD |
+| `gemini-2.5-flash-lite` | 20 Cognitive Walkers (`simulator.py`) | Free tier: 30 RPM, 1500 RPD |
+| `gemini-2.5-flash` | Study Designer + Panel Recruiter (`normalizer.py`, `scenarios.py`) | Free tier: 15 RPM, 500 RPD |
+| `gemini-2.5-flash` | Bias Auditor + Insight Analyst + Report Narrators (`auditor.py`, `synthesizer.py`, `narrative.py`) | Free tier: 15 RPM, 500 RPD |
 
 Rate limiting is per-model token buckets in `llm.py`. **Never call `llm.generate()` directly from outside the agents** — rate limiting and retries are baked in.
 
