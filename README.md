@@ -43,7 +43,7 @@ No traffic. No guessing. No waiting.
 |---|---|---|
 | **Single design** | One screenshot | Resonance score, friction themes, trust gaps, sprint stories |
 | **A/B pretest** | Two variants | All of the above + directional winner with gap significance |
-| **N-variant** *(roadmap)* | 3+ variants | Ranked resonance matrix |
+| **N-variant** *(roadmap)* | 3+ variants | Ranked resonance matrix | (in pipeline) 
 
 Start with a single design analysis — it's the fastest way to understand your audience before you build variant B.
 
