@@ -2,7 +2,8 @@ type FrictionTheme = {
   theme: string;
   count: number;
   severity: "high" | "medium" | "low";
-  example_quotes: string[];
+  example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
+  cohort?: "variant_a" | "variant_b" | "both";
 };
 
 type Props = {

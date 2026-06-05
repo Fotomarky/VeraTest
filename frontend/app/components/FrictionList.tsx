@@ -5,7 +5,7 @@ type FrictionTheme = {
   theme: string;
   count: number;
   severity: "high" | "medium" | "low";
-  example_quotes: string[];
+  example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
 };
 
 type Props = {
@@ -71,7 +71,7 @@ export default function FrictionList({
               {isOpen && hasQuotes && (
                 <div className="mt-2 space-y-1">
                   {t.example_quotes.map((q, j) => (
-                    <p key={j} className="text-xs text-neutral-600 italic">&ldquo;{q}&rdquo;</p>
+                    <p key={j} className="text-xs text-neutral-600 italic">&ldquo;{q.quote}&rdquo;</p>
                   ))}
                 </div>
               )}

@@ -61,13 +61,15 @@ type Run = {
       theme: string;
       count: number;
       severity: "high" | "medium" | "low";
-      example_quotes: string[];
+      example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
+      cohort?: "variant_a" | "variant_b" | "both";
     }>;
     what_worked_themes: Array<{
       theme: string;
       count: number;
       severity: "high" | "medium" | "low";
-      example_quotes: string[];
+      example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
+      cohort?: "variant_a" | "variant_b" | "both";
     }>;
     one_line_summary?: string;
     recommendation?: string;
@@ -314,6 +316,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
           foggAvg={foggAvg}
           winner={winner}
           simulationResults={run.simulation_results ?? []}
+          isSingleScreen={isSingleScreen}
         />
       )}
 
