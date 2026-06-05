@@ -169,11 +169,21 @@ class AuditReport(BaseModel):
 # Synthesis — final user-facing summary
 # ---------------------------------------------------------------------------
 
+class QuoteSource(BaseModel):
+    """A representative quote with the agent who said it (when known)."""
+    quote: str
+    agent_idx: Optional[int] = None
+    segment: Optional[str] = None
+
+
 class FrictionTheme(BaseModel):
     theme: str
     count: int
     severity: Literal["high", "medium", "low"] = "medium"
-    example_quotes: list[str] = Field(default_factory=list)
+    example_quotes: list[QuoteSource] = Field(default_factory=list)
+    # Which cohort the theme was clustered from. "both" = single-screen
+    # mode, or A/B tie where both cohorts contributed.
+    cohort: Literal["variant_a", "variant_b", "both"] = "both"
 
 
 class Synthesis(BaseModel):

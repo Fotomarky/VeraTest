@@ -5,7 +5,7 @@ import pytest
 from simab import exports, state
 from simab.integrations.slack import _build_slack_message
 from simab.models import (
-    AuditReport, Brief, FrictionTheme, ScenarioCard, SimResult, Synthesis,
+    AuditReport, Brief, FrictionTheme, QuoteSource, ScenarioCard, SimResult, Synthesis,
 )
 
 
@@ -78,13 +78,21 @@ async def _build_complete_run(run_id_out: list[str]) -> str:
                 theme="Pricing tier is unclear",
                 count=11,
                 severity="high",
-                example_quotes=["I couldn't tell which tier was the free one"],
+                example_quotes=[QuoteSource(
+                    quote="I couldn't tell which tier was the free one",
+                    agent_idx=3, segment="SaaS evaluator",
+                )],
+                cohort="variant_a",
             ),
             FrictionTheme(
                 theme="CTA buried below the fold",
                 count=7,
                 severity="medium",
-                example_quotes=["Had to scroll to find the signup button"],
+                example_quotes=[QuoteSource(
+                    quote="Had to scroll to find the signup button",
+                    agent_idx=7, segment="Mobile browser",
+                )],
+                cohort="variant_a",
             ),
         ],
         segment_splits={
