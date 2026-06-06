@@ -163,6 +163,13 @@ async def stream_run(run_id: str):
     async def event_generator():
         last_hash = None
         elapsed = 0
+        # Fidelity is computed in a background task that finishes a few
+        # seconds AFTER the run flips to 'complete'. Hold the stream open a
+        # bounded grace period past completion so the final 'update' carries
+        # the fidelity slice (the persona-consistency badge) — otherwise the
+        # client would have to manually refresh to see it.
+        grace = 0
+        FIDELITY_GRACE_SECONDS = 45
         while elapsed < MAX_SECONDS:
             run = await state.get_run(run_id)
             if run is None:
@@ -173,8 +180,12 @@ async def stream_run(run_id: str):
             if payload_hash != last_hash:
                 yield {"event": "update", "data": payload}
                 last_hash = payload_hash
-            if run.status in ("complete", "failed"):
+            if run.status == "failed":
                 return
+            if run.status == "complete":
+                if run.fidelity is not None or grace >= FIDELITY_GRACE_SECONDS:
+                    return
+                grace += 1
             await asyncio.sleep(1)
             elapsed += 1
 

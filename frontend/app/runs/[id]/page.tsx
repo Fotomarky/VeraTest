@@ -76,6 +76,13 @@ type Run = {
     confound_warning?: string;
     trust_signal_gaps?: string[];
   };
+  fidelity?: {
+    persona_consistency: number;
+    agents_drifted: number;
+    rationale_coherence?: number;
+    agents_incoherent?: number;
+    drifted_agent_indices?: number[];
+  } | null;
   error?: string;
 };
 
@@ -150,6 +157,12 @@ export default function RunPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
+    // The fidelity slice is written by a background task a few seconds AFTER
+    // the run flips to 'complete'. Keep polling briefly past completion so the
+    // persona-fidelity badge appears without a manual refresh, but bound it so
+    // we don't poll forever if Phoenix/fidelity never lands.
+    let postCompletePolls = 0;
+    const MAX_POST_COMPLETE_POLLS = 15;
 
     const stopPolling = () => {
       if (pollTimer !== null) {
@@ -158,7 +171,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
       }
     };
 
-    const startPolling = () => {
+    const startPolling = (intervalMs: number) => {
       if (pollTimer !== null) return;
       pollTimer = setInterval(async () => {
         if (cancelled) return;
@@ -168,11 +181,17 @@ export default function RunPage({ params }: { params: { id: string } }) {
           const data = await res.json();
           if (cancelled) return;
           setRun(data);
-          if (data.status === "complete" || data.status === "failed") {
+          if (data.status === "failed") {
             stopPolling();
+          } else if (data.status === "complete") {
+            if (data.fidelity != null || postCompletePolls >= MAX_POST_COMPLETE_POLLS) {
+              stopPolling();
+            } else {
+              postCompletePolls++;
+            }
           }
         } catch {}
-      }, 2000);
+      }, intervalMs);
     };
 
     // Initial fetch
@@ -189,12 +208,16 @@ export default function RunPage({ params }: { params: { id: string } }) {
         setRun(JSON.parse(e.data));
       } catch {}
     });
-    // When SSE drops (Cloud Run idle close, network blip, etc.), close the
-    // dead source and fall back to polling so we always reach the terminal
-    // state instead of silently freezing on the last seen status.
+    // Safety-net poll runs alongside SSE at a slow cadence. SSE delivers
+    // sub-second updates when it's healthy; the poll catches silently-dropped
+    // events on flaky paths (Cloud Run idle close, proxy buffering) so the
+    // phase pill always catches up within a few seconds.
+    startPolling(5000);
     source.onerror = () => {
       source.close();
-      startPolling();
+      // SSE confirmed dead — speed up the poll so updates stay responsive.
+      stopPolling();
+      startPolling(2000);
     };
 
     return () => {
@@ -271,6 +294,8 @@ export default function RunPage({ params }: { params: { id: string } }) {
       <CommandRail
         synthesis={synth ?? null}
         audit={run.audit ?? null}
+        fidelity={run.fidelity ?? null}
+        totalAgents={run.simulation_results?.length ?? 0}
         runId={run.run_id}
         status={run.status}
         onCopyMarkdown={copyMarkdown}

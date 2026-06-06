@@ -11,9 +11,18 @@ type AuditForRail = {
   trust_level: string;
 };
 
+type FidelityForRail = {
+  persona_consistency: number;
+  agents_drifted: number;
+  rationale_coherence?: number;
+  agents_incoherent?: number;
+};
+
 type Props = {
   synthesis: SynthesisForRail | null;
   audit: AuditForRail | null;
+  fidelity?: FidelityForRail | null;
+  totalAgents?: number;
   runId: string;
   status: string;
   onCopyMarkdown: () => void;
@@ -23,6 +32,8 @@ type Props = {
 export default function CommandRail({
   synthesis,
   audit,
+  fidelity,
+  totalAgents = 0,
   runId,
   status,
   onCopyMarkdown,
@@ -49,12 +60,36 @@ export default function CommandRail({
   const trustIssue =
     audit?.trust_level && audit.trust_level !== "high" ? audit.trust_level : null;
 
+  // Fidelity badge — the "how do I trust this?" answer. Fidelity is computed
+  // in a background task after the run completes, so it may briefly be null
+  // even when isComplete; show a "measuring…" placeholder until it lands.
+  const fidelityPct =
+    fidelity != null ? Math.round(fidelity.persona_consistency * 100) : null;
+  const stayedInPersona =
+    fidelity != null ? Math.max(0, totalAgents - fidelity.agents_drifted) : null;
+  const fidelityColor =
+    fidelityPct == null
+      ? "text-neutral-400"
+      : fidelityPct >= 90
+      ? "text-emerald-600"
+      : fidelityPct >= 75
+      ? "text-amber-600"
+      : "text-red-600";
+  const fidelityTitle =
+    fidelity != null
+      ? `LLM-as-a-Judge checked whether each of the ${totalAgents} agents stayed in its persona. ` +
+        `${fidelity.agents_drifted} drifted out of character` +
+        (fidelity.agents_incoherent != null
+          ? `; ${fidelity.agents_incoherent} had a score/rationale mismatch (code check).`
+          : ".")
+      : "";
+
   return (
     <div className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-neutral-200 px-4 py-2">
       <div className="flex items-center gap-4 max-w-4xl mx-auto">
 
-        {/* Left: validity */}
-        <div className="flex-shrink-0 w-44">
+        {/* Left: validity + persona-fidelity trust badge */}
+        <div className="flex-shrink-0 w-48 flex flex-col gap-0.5">
           {confoundWarning ? (
             <span className="text-xs text-orange-600 font-medium">⚠ Test design issue</span>
           ) : trustIssue ? (
@@ -68,6 +103,19 @@ export default function CommandRail({
           ) : (
             <span className="text-xs text-neutral-400">Analysing…</span>
           )}
+
+          {isComplete && fidelity != null && fidelityPct != null ? (
+            <span className="text-[10px] leading-tight" title={fidelityTitle}>
+              <span className={`${fidelityColor} font-medium`}>
+                {stayedInPersona}/{totalAgents} in persona
+              </span>
+              <span className="text-neutral-400"> ({fidelityPct}% fidelity)</span>
+            </span>
+          ) : isComplete ? (
+            <span className="text-[10px] text-neutral-400 leading-tight">
+              measuring persona fidelity…
+            </span>
+          ) : null}
         </div>
 
         {/* Center: balance bar or single-screen resonance badge */}
