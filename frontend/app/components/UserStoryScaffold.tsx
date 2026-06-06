@@ -23,72 +23,6 @@ type Props = {
   resultsBySegment: Map<string, SimResult[]>;
 };
 
-// Map negative friction adjectives to their positive "need" equivalents.
-// Keys are the bad phrase; values are what to prepend (or "" to just strip).
-// Order matters — longer phrases first so "lack of" beats "lack".
-const NEGATIVE_TO_NEED: Array<[RegExp, string]> = [
-  [/\black of\b/gi,        ""],
-  [/\babsence of\b/gi,     ""],
-  [/\bmissing\b/gi,        ""],
-  [/\babsent\b/gi,         ""],
-  [/\bno\b/gi,             ""],
-  [/\binadequate\b/gi,     "stronger"],
-  [/\binsufficient\b/gi,   "more complete"],
-  [/\bpoor\b/gi,           "stronger"],
-  [/\bweak\b/gi,           "stronger"],
-  [/\blimited\b/gi,        "more comprehensive"],
-  [/\bincomplete\b/gi,     "complete"],
-  [/\bpartial\b/gi,        "complete"],
-  [/\bsparse\b/gi,         "comprehensive"],
-  [/\bunclear\b/gi,        "clearer"],
-  [/\bambiguous\b/gi,      "clearer"],
-  [/\bvague\b/gi,          "clearer"],
-  [/\bconfusing\b/gi,      "clearer"],
-  [/\bcomplicated\b/gi,    "simpler"],
-  [/\boverwhelming\b/gi,   "simpler"],
-  [/\bexcessive\b/gi,      "less"],
-  [/\btoo many\b/gi,       "fewer"],
-  [/\btoo much\b/gi,       "less"],
-  [/\bredundant\b/gi,      "streamlined"],
-  [/\bintrusive\b/gi,      "less intrusive"],
-  [/\boutdated\b/gi,       "modernized"],
-  [/\bsuboptimal\b/gi,     "improved"],
-  [/\bdisjointed\b/gi,     "cohesive"],
-  [/\bbroken\b/gi,         "working"],
-  [/\bhidden\b/gi,         "more visible"],
-  [/\bburied\b/gi,         "more visible"],
-  [/\bobscured\b/gi,       "more visible"],
-  [/\birrelevant\b/gi,     "more targeted"],
-  [/\bgeneric\b/gi,        "more specific"],
-];
-
-// Convert a friction theme (a PROBLEM) into a need-phrase (a SOLUTION) so
-// the user story "I need X" reads naturally. A friction theme like
-// "Inadequate Feature Comparison & Detail" should yield "stronger feature
-// comparison & detail", not the literal friction phrase.
-export function themeToNeed(theme: string): string {
-  let cleaned = theme;
-  let prepend: string | null = null;
-  for (const [pattern, replacement] of NEGATIVE_TO_NEED) {
-    if (pattern.test(cleaned)) {
-      // Capture the first positive replacement found (don't double-prepend).
-      if (replacement && !prepend) prepend = replacement;
-      // Reset lastIndex for the global regex before replacing.
-      cleaned = cleaned.replace(pattern, "").trim();
-    }
-  }
-  // Remove leading conjunctions / punctuation left behind by stripping
-  // ("& Irrelevant Foo" → "& Foo" → "Foo").
-  cleaned = cleaned.replace(/^[\s&,]+|(\s*\band\b\s*)+/gi, " ").trim();
-  // Collapse double spaces from successive strips.
-  cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
-  if (!cleaned) return theme;
-  const lower = cleaned.charAt(0) === cleaned.charAt(0).toLowerCase()
-    ? cleaned
-    : cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
-  return prepend ? `${prepend} ${lower}` : lower;
-}
-
 function findPrimaryPersona(
   theme: FrictionTheme,
   resultsBySegment: Map<string, SimResult[]>
@@ -166,8 +100,7 @@ export default function UserStoryScaffold({
       <div className="space-y-3">
         {highMed.map((t, i) => {
           const persona = cleanPersona(findPrimaryPersona(t, resultsBySegment));
-          const need = themeToNeed(t.theme);
-          const text = `As a ${persona},\nI need ${need},\nso that I can ${goal}.`;
+          const text = `As a ${persona},\nI need ${t.theme} resolved,\nso that I can ${goal}.`;
           const key = `friction-${i}`;
           return (
             <div
