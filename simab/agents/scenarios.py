@@ -6,6 +6,7 @@ agents (default 20) proportionally to weight. If a persona is 60% of traffic,
 context so we don't get identical responses.
 """
 from __future__ import annotations
+import asyncio
 import logging
 
 from .. import state
@@ -155,14 +156,36 @@ def _allocate(weights: list[float], total: int) -> list[int]:
     return floors
 
 
+async def _generate_variations(persona, count: int) -> list[dict]:
+    """One LLM call to produce `count` micro-variations of `persona`. Returns a
+    list of dicts (may be shorter than `count` if the LLM under-delivers; an
+    empty list signals "fall back to replicating the base persona")."""
+    raw = await generate(
+        model=MODEL_FLASH,
+        prompt=VARIATION_PROMPT.format(
+            count=count, persona_json=persona.model_dump_json(indent=2)
+        ),
+        response_schema={},
+        temperature=0.7,  # higher temp for diversity
+    )
+    variations = raw if isinstance(raw, list) else (
+        raw.get("variations") or raw.get("personas") or raw.get("items") or []
+    )
+    if not isinstance(variations, list):
+        return []
+    return variations
+
+
 async def run(run_id: str, num_agents: int | None = None) -> list[ScenarioCard]:
     """Build the final scenario list with one entry per simulation agent."""
+    # Flip status before any I/O so the UI advances the phase pill the moment
+    # the pipeline hands off to this agent, not after the brief read.
+    await state.set_status(run_id, "building_scenarios")
+
     num_agents = num_agents or CONFIG.num_agents
     run = await state.get_run(run_id)
     if run is None or run.brief is None:
         raise ValueError(f"Run {run_id} has no brief")
-
-    await state.set_status(run_id, "building_scenarios")
 
     personas = run.brief.inferred_personas
     if not personas:
@@ -172,11 +195,32 @@ async def run(run_id: str, num_agents: int | None = None) -> list[ScenarioCard]:
                for p in personas]
     allocation_counts = _allocate(weights, num_agents)
 
+    # Fire all per-persona variation calls concurrently. Personas with count<=1
+    # don't need an LLM call — `None` placeholder keeps positional alignment
+    # with `personas`/`allocation_counts`.
+    variation_tasks = [
+        _generate_variations(p, c) if c > 1 else None
+        for p, c in zip(personas, allocation_counts)
+    ]
+    pending = [(i, t) for i, t in enumerate(variation_tasks) if t is not None]
+    if pending:
+        results = await asyncio.gather(*(t for _, t in pending), return_exceptions=True)
+        variations_by_idx: dict[int, list[dict]] = {}
+        for (i, _), res in zip(pending, results):
+            if isinstance(res, Exception):
+                log.warning(f"[{run_id}] variation call failed for persona "
+                            f"{personas[i].id}: {res}; using base persona")
+                variations_by_idx[i] = []
+            else:
+                variations_by_idx[i] = res
+    else:
+        variations_by_idx = {}
+
     final_scenarios: list[ScenarioCard] = []
     allocations: list[dict] = []
     agent_idx = 0
 
-    for persona, count in zip(personas, allocation_counts):
+    for i, (persona, count) in enumerate(zip(personas, allocation_counts)):
         allocations.append({
             "persona_id": persona.id,
             "segment": persona.segment,
@@ -187,32 +231,18 @@ async def run(run_id: str, num_agents: int | None = None) -> list[ScenarioCard]:
             continue
 
         if count == 1:
-            # Just clone the base persona once
             sc = persona.model_copy()
             sc.id = f"{persona.id}_a{agent_idx:02d}"
             final_scenarios.append(sc)
             agent_idx += 1
             continue
 
-        # Ask LLM to vary the context for the rest
-        raw = await generate(
-            model=MODEL_FLASH,
-            prompt=VARIATION_PROMPT.format(
-                count=count, persona_json=persona.model_dump_json(indent=2)
-            ),
-            response_schema={},
-            temperature=0.7,  # higher temp for diversity
-        )
-
-        # Be lenient: raw may be a list or a dict with a list inside
-        variations = raw if isinstance(raw, list) else (
-            raw.get("variations") or raw.get("personas") or raw.get("items") or []
-        )
-        if not isinstance(variations, list) or len(variations) == 0:
+        variations = variations_by_idx.get(i, [])
+        if not variations:
             # Fallback: replicate base persona
             variations = [persona.model_dump() for _ in range(count)]
 
-        for j, var in enumerate(variations[:count]):
+        for var in variations[:count]:
             try:
                 merged = {**persona.model_dump(), **var}
                 merged["id"] = f"{persona.id}_a{agent_idx:02d}"

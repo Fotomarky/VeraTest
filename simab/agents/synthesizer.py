@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 from .. import state
 from ..llm import MODEL_FLASH, generate
 from ..models import (
-    FrictionTheme, QuoteSource, RESONANCE_DIMS, RESONANCE_WEIGHTS,
+    AuditReport, FrictionTheme, QuoteSource, RESONANCE_DIMS, RESONANCE_WEIGHTS,
     ScenarioCard, SimResult, Synthesis,
 )
 
@@ -292,12 +292,36 @@ def _tag_cohort(themes: list[FrictionTheme], cohort: str) -> list[FrictionTheme]
 # Main entry
 # ---------------------------------------------------------------------------
 
-async def run(run_id: str) -> Synthesis:
+async def _resolve_audit(
+    run_id: str,
+    audit_task: asyncio.Task[AuditReport] | None,
+) -> AuditReport:
+    """Get the AuditReport — from the parallel task if provided (parallel
+    audit+synth mode), otherwise from state (legacy sequential mode)."""
+    if audit_task is not None:
+        return await audit_task
     run = await state.get_run(run_id)
     if run is None or run.audit is None:
-        raise ValueError(f"Run {run_id} not ready for synthesis")
+        raise ValueError(f"Run {run_id} audit not available")
+    return run.audit
 
-    await state.set_status(run_id, "synthesizing")
+
+async def run(
+    run_id: str,
+    audit_task: asyncio.Task[AuditReport] | None = None,
+) -> Synthesis:
+    """Synthesize cohort resonance + friction themes into the final report.
+
+    When `audit_task` is passed, the synthesizer runs its expensive cluster
+    work in parallel with the auditor and only awaits the audit result just
+    before the final summary call (which needs `trust_level`). When called
+    without a task, the audit must already be present in state.
+    """
+    run = await state.get_run(run_id)
+    if run is None:
+        raise ValueError(f"Run {run_id} not found")
+    if audit_task is None and run.audit is None:
+        raise ValueError(f"Run {run_id} audit not ready")
 
     results = run.simulation_results
     single_screen = not run.variant_b_path
@@ -330,12 +354,18 @@ async def run(run_id: str) -> Synthesis:
         _tag_cohort(top_friction, "both")
         _tag_cohort(worked_themes, "both")
 
+        # Cluster work done — now we need the audit's trust_level. In
+        # parallel mode this awaits the in-flight audit task; in legacy mode
+        # it reads from state.
+        audit = await _resolve_audit(run_id, audit_task)
+        await state.set_status(run_id, "synthesizing")
+
         overall_score = cohort_overall.get("variant_a", 0.0)
         summary_raw = await generate(
             model=MODEL_FLASH,
             prompt=SINGLE_SCREEN_SUMMARY_PROMPT.format(
                 overall=overall_score,
-                trust=run.audit.trust_level,
+                trust=audit.trust_level,
                 themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
             ),
             response_schema={},
@@ -368,13 +398,19 @@ async def run(run_id: str) -> Synthesis:
         _tag_cohort(top_friction, losing_cohort)
         _tag_cohort(worked_themes, winning_cohort)
 
+        # Cluster work done — now we need the audit's trust_level. In
+        # parallel mode this awaits the in-flight audit task; in legacy mode
+        # it reads from state.
+        audit = await _resolve_audit(run_id, audit_task)
+        await state.set_status(run_id, "synthesizing")
+
         summary_raw = await generate(
             model=MODEL_FLASH,
             prompt=SUMMARY_PROMPT.format(
                 winner=directional_winner,
                 gap=gap,
                 significance=gap_significance,
-                trust=run.audit.trust_level,
+                trust=audit.trust_level,
                 a_overall=cohort_overall.get("variant_a", 0.0),
                 b_overall=cohort_overall.get("variant_b", 0.0),
                 themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",

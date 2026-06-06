@@ -55,8 +55,21 @@ async def run_pipeline(run_id: str) -> None:
             await normalizer.run(run_id)
             await scenarios.run(run_id)
             await _run_simulators(run_id)
-            await auditor.run(run_id)
-            await synthesizer.run(run_id)
+            # Audit + synthesize concurrently. The synthesizer's cluster work
+            # doesn't need the audit; only its final summary call does. It
+            # awaits `audit_task` internally just before that call, so audit
+            # runs in parallel with the clustering for ~25s of wall savings.
+            audit_task = asyncio.create_task(auditor.run(run_id))
+            try:
+                await synthesizer.run(run_id, audit_task=audit_task)
+            except Exception:
+                if not audit_task.done():
+                    audit_task.cancel()
+                raise
+            # Synth awaits the task internally, but guard against any path
+            # that lets it return without consuming the result.
+            if not audit_task.done():
+                await audit_task
             await narrative.run(run_id)
             await state.set_status(run_id, "complete")
         log.info(f"[{run_id}] pipeline complete")
