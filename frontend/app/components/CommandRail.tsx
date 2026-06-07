@@ -7,10 +7,6 @@ type SynthesisForRail = {
   confound_warning?: string;
 };
 
-type AuditForRail = {
-  trust_level: string;
-};
-
 type FidelityForRail = {
   persona_consistency: number;
   agents_drifted: number;
@@ -20,7 +16,6 @@ type FidelityForRail = {
 
 type Props = {
   synthesis: SynthesisForRail | null;
-  audit: AuditForRail | null;
   fidelity?: FidelityForRail | null;
   totalAgents?: number;
   runId: string;
@@ -31,7 +26,6 @@ type Props = {
 
 export default function CommandRail({
   synthesis,
-  audit,
   fidelity,
   totalAgents = 0,
   runId,
@@ -57,8 +51,6 @@ export default function CommandRail({
   const voteB = 100 - voteA;
 
   const confoundWarning = synthesis?.confound_warning;
-  const trustIssue =
-    audit?.trust_level && audit.trust_level !== "high" ? audit.trust_level : null;
 
   // Fidelity badge — the "how do I trust this?" answer. Fidelity is computed
   // in a background task after the run completes, so it may briefly be null
@@ -92,10 +84,6 @@ export default function CommandRail({
         <div className="flex-shrink-0 w-48 flex flex-col gap-0.5">
           {confoundWarning ? (
             <span className="text-xs text-orange-600 font-medium">⚠ Test design issue</span>
-          ) : trustIssue ? (
-            <span className="text-xs text-amber-600 font-medium">
-              ⚠ Trust: {trustIssue.toUpperCase()}
-            </span>
           ) : isComplete ? (
             <span className="text-xs text-emerald-600 font-medium">✓ Valid test</span>
           ) : status === "failed" ? (

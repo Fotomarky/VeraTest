@@ -251,7 +251,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
         </div>
         <CommandRail
           synthesis={null}
-          audit={null}
           runId={params.id}
           status="pending"
           onCopyMarkdown={copyMarkdown}
@@ -292,7 +291,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
       <CommandRail
         synthesis={synth ?? null}
-        audit={run.audit ?? null}
         fidelity={run.fidelity ?? null}
         totalAgents={run.simulation_results?.length ?? 0}
         runId={run.run_id}
