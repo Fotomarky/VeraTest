@@ -280,6 +280,28 @@ export default function PackmanTheater({
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, 640, 180);
 
+      // 80s-arcade typewriter caption drawn on top of the figures.
+      const FULL_TEXT = "AGENTS ARE RUNNING";
+      // ~7 frames per character reveal, hold the full string, then loop.
+      const cycleLen = FULL_TEXT.length * 7 + 40;
+      const phase = frame % cycleLen;
+      const revealed = Math.min(FULL_TEXT.length, Math.floor(phase / 7));
+      const shown = FULL_TEXT.slice(0, revealed);
+      const cursorOn = Math.floor(frame / 16) % 2 === 0;
+      const caption = shown + (revealed < FULL_TEXT.length || cursorOn ? "_" : " ");
+
+      ctx.save();
+      ctx.font = "bold 18px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      // dark drop-shadow for the neon-on-CRT look
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillText(caption, 320 + 2, 14 + 2);
+      // color-cycle the fill between arcade cyan and yellow
+      ctx.fillStyle = Math.floor(frame / 20) % 2 === 0 ? "#22d3ee" : "#fde047";
+      ctx.fillText(caption, 320, 14);
+      ctx.restore();
+
       if (countRef.current) {
         const totalAgents = currentRun?.scenarios?.length ?? agents.length;
         const completedAgents = simResults.length;
@@ -319,7 +341,7 @@ export default function PackmanTheater({
         />
       </div>
       <p className="text-center text-xs text-neutral-400 mt-2 font-mono">
-        Agents doing their job… <span ref={countRef}>0 / 0</span>
+        <span ref={countRef}>0 / 0</span> agents
       </p>
     </div>
   );
