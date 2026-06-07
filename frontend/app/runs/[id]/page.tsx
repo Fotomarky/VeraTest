@@ -347,21 +347,28 @@ export default function RunPage({ params }: { params: { id: string } }) {
         />
       )}
 
+      {synth && (
+        <details className="rounded-lg border border-neutral-200 bg-white">
+          <summary className="cursor-pointer px-5 py-3 text-sm font-semibold select-none">
+            Copy to backlog — user stories
+          </summary>
+          <div className="px-5 pb-5">
+            <UserStoryScaffold
+              topFriction={synth.top_friction ?? []}
+              whatWorkedThemes={synth.what_worked_themes ?? []}
+              goal={run.goal}
+              resultsBySegment={resultsBySegment}
+            />
+          </div>
+        </details>
+      )}
+
       {uniquePersonas.length > 0 && (
         <PersonaCarousel
           personas={uniquePersonas}
           resultsBySegment={resultsBySegment}
           winner={winner}
           isSingleScreen={isSingleScreen}
-        />
-      )}
-
-      {synth && (
-        <UserStoryScaffold
-          topFriction={synth.top_friction ?? []}
-          whatWorkedThemes={synth.what_worked_themes ?? []}
-          goal={run.goal}
-          resultsBySegment={resultsBySegment}
         />
       )}
 
