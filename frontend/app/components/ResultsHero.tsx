@@ -123,6 +123,8 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
                   <button
                     key={p.segment}
                     onClick={() => setSelected(isActive ? null : p.segment)}
+                    aria-expanded={isActive}
+                    aria-label={`${cleanPersona(p.segment)}, ${count} agent${count !== 1 ? "s" : ""}, ${leanLabel}${tip ? `, top friction: ${tip}` : ""}`}
                     className="group relative flex flex-col items-center gap-1 w-24 text-center"
                   >
                     <div
