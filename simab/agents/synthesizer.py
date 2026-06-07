@@ -42,6 +42,8 @@ Respond with ONLY a JSON object:
       "theme": "Specific, actionable description",
       "count": 7,
       "severity": "high" | "medium" | "low",
+      "recommended_action": "An imperative fix a PM could ship next, phrased positively. For a problem theme describe what to ADD/CLARIFY/FIX (e.g. 'Add concrete use cases and tighten vague feature copy'). For a positive theme describe what to PRESERVE.",
+      "user_need": "The underlying user need as a POSITIVE noun phrase that completes 'I need ___'. NEVER restate the negative — use the desired attribute instead (e.g. theme 'Vague features & lack of use cases' -> 'clear features with concrete use cases'; theme 'Information overload' -> 'a focused, scannable layout'). No leading 'I need'.",
       "example_quotes": [
         {{"quote": "...", "agent_idx": 7}},
         {{"quote": "...", "agent_idx": 12}}
@@ -273,6 +275,8 @@ async def _cluster_friction(
                 theme=t["theme"],
                 count=int(t.get("count", 0)),
                 severity=t.get("severity", "medium"),
+                recommended_action=str(t.get("recommended_action", "")).strip(),
+                user_need=str(t.get("user_need", "")).strip(),
                 example_quotes=[q for q in quotes if q.quote],
             ))
         except Exception as e:

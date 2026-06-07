@@ -7,6 +7,8 @@ type FrictionTheme = {
   severity: "high" | "medium" | "low";
   example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
   cohort?: "variant_a" | "variant_b" | "both";
+  recommended_action?: string;
+  user_need?: string;
 };
 
 type SimResult = {
@@ -100,7 +102,10 @@ export default function UserStoryScaffold({
       <div className="space-y-3">
         {highMed.map((t, i) => {
           const persona = cleanPersona(findPrimaryPersona(t, resultsBySegment));
-          const text = `As a ${persona},\nI need ${t.theme} resolved,\nso that I can ${goal}.`;
+          // Prefer the LLM-authored positive need; fall back to the verbatim
+          // theme for pre-existing runs that lack the field.
+          const need = t.user_need?.trim() || `${t.theme} resolved`;
+          const text = `As a ${persona},\nI need ${need},\nso that I can ${goal}.`;
           const key = `friction-${i}`;
           return (
             <div

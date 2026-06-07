@@ -4,6 +4,8 @@ type FrictionTheme = {
   severity: "high" | "medium" | "low";
   example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
   cohort?: "variant_a" | "variant_b" | "both";
+  recommended_action?: string;
+  user_need?: string;
 };
 
 type SimResult = {
@@ -103,7 +105,9 @@ export default function WhatToDoNext({
                 {i + 1}.
               </span>
               <span className="flex-shrink-0">{SEV_ICON[t.severity] ?? "🟡"}</span>
-              <span className="flex-1 text-blue-900">{themeToAction(t.theme)}</span>
+              <span className="flex-1 text-blue-900">
+                {t.recommended_action?.trim() || themeToAction(t.theme)}
+              </span>
               <span className="text-xs text-blue-400 flex-shrink-0">
                 → {t.count} agent{t.count !== 1 ? "s" : ""}
               </span>

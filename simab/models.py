@@ -184,6 +184,11 @@ class FrictionTheme(BaseModel):
     # Which cohort the theme was clustered from. "both" = single-screen
     # mode, or A/B tie where both cohorts contributed.
     cohort: Literal["variant_a", "variant_b", "both"] = "both"
+    # LLM-authored phrasings so the UI never has to invert a negative theme
+    # label into an action/need with brittle regex. Empty on pre-existing runs;
+    # the frontend falls back to deterministic phrasing when blank.
+    recommended_action: str = ""  # imperative fix, e.g. "Add concrete use cases"
+    user_need: str = ""  # positive need phrase, e.g. "clear, specific use cases"
 
 
 class Synthesis(BaseModel):

@@ -75,13 +75,22 @@ function topFrictionPoint(results: SimResult[]): string | null {
 export default function ResultsHero({ runId, personas, resultsBySegment, winner, isSingleScreen }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
 
-  const sorted = [...personas].sort((a, b) => {
-    const ac = resultsBySegment.get(a.segment)?.length ?? 0;
-    const bc = resultsBySegment.get(b.segment)?.length ?? 0;
-    return bc - ac;
-  });
+  // The "stress_test_" persona is an internal calibration anchor auto-injected
+  // into every run (it feeds the fidelity check); the user never picked it, so
+  // keep it out of the audience panel. Counts below are derived from the
+  // visible set so the header stays consistent with the circles shown.
+  const sorted = [...personas]
+    .filter((p) => !p.segment.startsWith("stress_test_"))
+    .sort((a, b) => {
+      const ac = resultsBySegment.get(a.segment)?.length ?? 0;
+      const bc = resultsBySegment.get(b.segment)?.length ?? 0;
+      return bc - ac;
+    });
 
-  const totalAgents = Array.from(resultsBySegment.values()).reduce((s, r) => s + r.length, 0);
+  const totalAgents = sorted.reduce(
+    (s, p) => s + (resultsBySegment.get(p.segment)?.length ?? 0),
+    0
+  );
   const selectedPersona = sorted.find((p) => p.segment === selected) ?? null;
   const selectedResults = selectedPersona ? resultsBySegment.get(selectedPersona.segment) ?? [] : [];
 
