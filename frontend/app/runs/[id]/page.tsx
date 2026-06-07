@@ -4,7 +4,7 @@ import PackmanTheater from "../../components/PackmanTheater";
 import CommandRail from "../../components/CommandRail";
 import WhatToDoNext from "../../components/WhatToDoNext";
 import BlockersMatrix from "../../components/BlockersMatrix";
-import PersonaCarousel from "../../components/PersonaCarousel";
+import ResultsHero from "../../components/ResultsHero";
 import UserStoryScaffold from "../../components/UserStoryScaffold";
 import VisualEvidence from "../../components/VisualEvidence";
 
@@ -301,6 +301,16 @@ export default function RunPage({ params }: { params: { id: string } }) {
         copied={copied}
       />
 
+      {synth && uniquePersonas.length > 0 && (
+        <ResultsHero
+          runId={run.run_id}
+          personas={uniquePersonas}
+          resultsBySegment={resultsBySegment}
+          winner={winner}
+          isSingleScreen={isSingleScreen}
+        />
+      )}
+
       {inProgress && (
         <PackmanTheater
           run={run}
@@ -361,15 +371,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
             />
           </div>
         </details>
-      )}
-
-      {uniquePersonas.length > 0 && (
-        <PersonaCarousel
-          personas={uniquePersonas}
-          resultsBySegment={resultsBySegment}
-          winner={winner}
-          isSingleScreen={isSingleScreen}
-        />
       )}
 
       <VisualEvidence
