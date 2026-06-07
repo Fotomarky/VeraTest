@@ -2,11 +2,10 @@
 import { useEffect, useState } from "react";
 import PackmanTheater from "../../components/PackmanTheater";
 import CommandRail from "../../components/CommandRail";
-import SprintPriorities from "../../components/SprintPriorities";
+import WhatToDoNext from "../../components/WhatToDoNext";
 import BlockersMatrix from "../../components/BlockersMatrix";
 import PersonaCarousel from "../../components/PersonaCarousel";
 import UserStoryScaffold from "../../components/UserStoryScaffold";
-import TestNextHypothesis from "../../components/TestNextHypothesis";
 import VisualEvidence from "../../components/VisualEvidence";
 
 type ScenarioCard = {
@@ -324,9 +323,12 @@ export default function RunPage({ params }: { params: { id: string } }) {
       )}
 
       {synth && (
-        <SprintPriorities
+        <WhatToDoNext
           topFriction={synth.top_friction ?? []}
           recommendation={synth.recommendation}
+          foggAvg={foggAvg}
+          winner={winner}
+          simulationResults={run.simulation_results ?? []}
           confoundWarning={synth.confound_warning}
           totalAgents={run.simulation_results?.length ?? total}
           personaCount={uniquePersonas.length}
@@ -360,15 +362,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
           whatWorkedThemes={synth.what_worked_themes ?? []}
           goal={run.goal}
           resultsBySegment={resultsBySegment}
-        />
-      )}
-
-      {synth?.recommendation && (
-        <TestNextHypothesis
-          recommendation={synth.recommendation}
-          foggAvg={foggAvg}
-          winner={winner}
-          simulationResults={run.simulation_results ?? []}
         />
       )}
 
