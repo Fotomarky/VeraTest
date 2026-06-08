@@ -51,3 +51,7 @@ phoenix_data/
 
 # Logs
 *.log
+.superpowers/
+
+# Claude Code local config / memory
+.claude/

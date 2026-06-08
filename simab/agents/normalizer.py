@@ -222,11 +222,11 @@ Respond with ONLY a JSON object:
 
 async def run(run_id: str) -> Brief:
     """Read inputs from shared state, write brief back."""
+    await state.set_status(run_id, "normalizing")
+
     run = await state.get_run(run_id)
     if run is None:
         raise ValueError(f"Run {run_id} not found")
-
-    await state.set_status(run_id, "normalizing")
 
     img_a = Path(run.variant_a_path).read_bytes()
     audience_block = _format_audience_block(run.audience_preset, run.audience_raw)

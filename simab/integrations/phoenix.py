@@ -39,21 +39,29 @@ def init_phoenix() -> bool:
         from phoenix.otel import register
         from openinference.instrumentation.google_genai import GoogleGenAIInstrumentor
 
+        # Phoenix Cloud needs OTLP HTTP/protobuf, and the URL must include
+        # the space-scoped /v1/traces suffix (e.g. /s/<space>/v1/traces).
+        # phoenix.otel.register() applies that suffix via its _KNOWN_PROVIDERS
+        # normalizer ONLY when the endpoint comes from PHOENIX_COLLECTOR_ENDPOINT
+        # — passing endpoint= explicitly bypasses normalization and the
+        # exporter ends up POSTing to the dashboard URL (405 Method Not
+        # Allowed). So we rely on the env var instead of passing endpoint=.
         register_kwargs = dict(
             project_name=CONFIG.phoenix_project,
-            endpoint=CONFIG.phoenix_endpoint,
+            protocol="http/protobuf",
+            batch=True,
             auto_instrument=False,
         )
         if CONFIG.phoenix_api_key:
-            # Phoenix Cloud authenticates via standard OTLP Bearer header,
-            # not a custom `api_key` field.
-            register_kwargs["headers"] = {
-                "authorization": f"Bearer {CONFIG.phoenix_api_key}",
-            }
+            register_kwargs["api_key"] = CONFIG.phoenix_api_key
         tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
         _initialized = True
-        log.info(f"Phoenix tracing enabled — UI at http://localhost:6006")
+        ui_hint = CONFIG.phoenix_endpoint or "http://localhost:6006"
+        log.info(
+            f"Phoenix tracing enabled — exporting to {CONFIG.phoenix_endpoint} "
+            f"(project={CONFIG.phoenix_project}). UI: {ui_hint}"
+        )
         return True
     except ImportError:
         log.warning(

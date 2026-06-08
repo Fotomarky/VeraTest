@@ -179,11 +179,11 @@ def _trust_level(
 
 
 async def run(run_id: str) -> AuditReport:
+    await state.set_status(run_id, "auditing")
+
     run = await state.get_run(run_id)
     if run is None:
         raise ValueError(f"Run {run_id} not found")
-
-    await state.set_status(run_id, "auditing")
     results = run.simulation_results
     if not results:
         raise ValueError("No simulation results to audit")

@@ -8,6 +8,7 @@ Replaces the vote-based winner with a gap-and-significance verdict:
 - per-persona resonance matrix kept for the diagnostic heatmap
 """
 from __future__ import annotations
+import asyncio
 import logging
 import math
 from collections import Counter, defaultdict
@@ -15,7 +16,8 @@ from collections import Counter, defaultdict
 from .. import state
 from ..llm import MODEL_FLASH, generate
 from ..models import (
-    FrictionTheme, RESONANCE_DIMS, RESONANCE_WEIGHTS, ScenarioCard, SimResult, Synthesis,
+    AuditReport, FrictionTheme, QuoteSource, RESONANCE_DIMS, RESONANCE_WEIGHTS,
+    ScenarioCard, SimResult, Synthesis,
 )
 
 log = logging.getLogger(__name__)
@@ -26,7 +28,9 @@ Below are {kind} reported by simulated users evaluating a landing page.
 Cluster them into 3-5 distinct themes. Each theme should be specific and
 actionable (not generic like "page is bad").
 
-For each theme, pick 1-2 example quotes from the raw list that best illustrate it.
+For each theme, pick 1-2 example quotes from the raw list that best illustrate
+it. Each line is prefixed with [#N] — the index of the agent who reported it.
+Carry that index through to every quote you return so a PM can trace it back.
 
 {kind} (one per line, possibly with duplicates):
 {lines}
@@ -38,7 +42,12 @@ Respond with ONLY a JSON object:
       "theme": "Specific, actionable description",
       "count": 7,
       "severity": "high" | "medium" | "low",
-      "example_quotes": ["...", "..."]
+      "recommended_action": "An imperative fix a PM could ship next, phrased positively. For a problem theme describe what to ADD/CLARIFY/FIX (e.g. 'Add concrete use cases and tighten vague feature copy'). For a positive theme describe what to PRESERVE.",
+      "user_need": "The underlying user need as a POSITIVE noun phrase that completes 'I need ___'. NEVER restate the negative — use the desired attribute instead (e.g. theme 'Vague features & lack of use cases' -> 'clear features with concrete use cases'; theme 'Information overload' -> 'a focused, scannable layout'). No leading 'I need'.",
+      "example_quotes": [
+        {{"quote": "...", "agent_idx": 7}},
+        {{"quote": "...", "agent_idx": 12}}
+      ]
     }}
   ]
 }}
@@ -224,11 +233,18 @@ async def _cluster_friction(
     field: str,
     kind_label: str,
 ) -> list[FrictionTheme]:
-    """One LLM call to cluster either friction_points or what_worked into themes."""
-    lines = []
+    """One LLM call to cluster either friction_points or what_worked into themes.
+
+    Each source line is tagged with [#agent_idx] so the LLM can return the
+    same index per quote — that lets the UI label each quote with the
+    persona who said it.
+    """
+    lines: list[str] = []
+    segment_by_idx: dict[int, str] = {}
     for r in items:
+        segment_by_idx[r.agent_idx] = r.scenario_segment
         for f in getattr(r, field):
-            lines.append(f"- {f}")
+            lines.append(f"- [#{r.agent_idx}] {f}")
     if not lines:
         return []
     raw = await generate(
@@ -241,27 +257,75 @@ async def _cluster_friction(
     themes: list[FrictionTheme] = []
     for t in themes_data:
         try:
+            quotes_raw = t.get("example_quotes", []) or []
+            quotes: list[QuoteSource] = []
+            for q in quotes_raw:
+                # Tolerate both new structured shape and legacy plain strings.
+                if isinstance(q, str):
+                    quotes.append(QuoteSource(quote=q))
+                    continue
+                idx_raw = q.get("agent_idx")
+                idx = int(idx_raw) if isinstance(idx_raw, (int, str)) and str(idx_raw).lstrip("-").isdigit() else None
+                quotes.append(QuoteSource(
+                    quote=q.get("quote", "").strip(),
+                    agent_idx=idx,
+                    segment=segment_by_idx.get(idx) if idx is not None else None,
+                ))
             themes.append(FrictionTheme(
                 theme=t["theme"],
                 count=int(t.get("count", 0)),
                 severity=t.get("severity", "medium"),
-                example_quotes=t.get("example_quotes", []),
+                recommended_action=str(t.get("recommended_action", "")).strip(),
+                user_need=str(t.get("user_need", "")).strip(),
+                example_quotes=[q for q in quotes if q.quote],
             ))
         except Exception as e:
             log.warning(f"Theme parse failed: {e}")
     return sorted(themes, key=lambda t: t.count, reverse=True)
 
 
+def _tag_cohort(themes: list[FrictionTheme], cohort: str) -> list[FrictionTheme]:
+    """Attach the cohort label every theme came from so the UI can render
+    A/B chips. Mutates in place (FrictionTheme is mutable Pydantic v2)."""
+    for t in themes:
+        t.cohort = cohort  # type: ignore[assignment]
+    return themes
+
+
 # ---------------------------------------------------------------------------
 # Main entry
 # ---------------------------------------------------------------------------
 
-async def run(run_id: str) -> Synthesis:
+async def _resolve_audit(
+    run_id: str,
+    audit_task: asyncio.Task[AuditReport] | None,
+) -> AuditReport:
+    """Get the AuditReport — from the parallel task if provided (parallel
+    audit+synth mode), otherwise from state (legacy sequential mode)."""
+    if audit_task is not None:
+        return await audit_task
     run = await state.get_run(run_id)
     if run is None or run.audit is None:
-        raise ValueError(f"Run {run_id} not ready for synthesis")
+        raise ValueError(f"Run {run_id} audit not available")
+    return run.audit
 
-    await state.set_status(run_id, "synthesizing")
+
+async def run(
+    run_id: str,
+    audit_task: asyncio.Task[AuditReport] | None = None,
+) -> Synthesis:
+    """Synthesize cohort resonance + friction themes into the final report.
+
+    When `audit_task` is passed, the synthesizer runs its expensive cluster
+    work in parallel with the auditor and only awaits the audit result just
+    before the final summary call (which needs `trust_level`). When called
+    without a task, the audit must already be present in state.
+    """
+    run = await state.get_run(run_id)
+    if run is None:
+        raise ValueError(f"Run {run_id} not found")
+    if audit_task is None and run.audit is None:
+        raise ValueError(f"Run {run_id} audit not ready")
 
     results = run.simulation_results
     single_screen = not run.variant_b_path
@@ -284,15 +348,28 @@ async def run(run_id: str) -> Synthesis:
         directional_winner, gap_significance = "tie", "tie"
         pooled = 0.0
 
-        top_friction = await _cluster_friction(results, "friction_points", "FRICTION POINTS")
-        worked_themes = await _cluster_friction(results, "what_worked", "WHAT WORKED")
+        # Two independent Flash calls — run in parallel.
+        top_friction, worked_themes = await asyncio.gather(
+            _cluster_friction(results, "friction_points", "FRICTION POINTS"),
+            _cluster_friction(results, "what_worked", "WHAT WORKED"),
+        )
+        # Single-screen: only one variant exists, mark all as "both"
+        # (frontend hides the chip in this mode).
+        _tag_cohort(top_friction, "both")
+        _tag_cohort(worked_themes, "both")
+
+        # Cluster work done — now we need the audit's trust_level. In
+        # parallel mode this awaits the in-flight audit task; in legacy mode
+        # it reads from state.
+        audit = await _resolve_audit(run_id, audit_task)
+        await state.set_status(run_id, "synthesizing")
 
         overall_score = cohort_overall.get("variant_a", 0.0)
         summary_raw = await generate(
             model=MODEL_FLASH,
             prompt=SINGLE_SCREEN_SUMMARY_PROMPT.format(
                 overall=overall_score,
-                trust=run.audit.trust_level,
+                trust=audit.trust_level,
                 themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",
             ),
             response_schema={},
@@ -308,13 +385,28 @@ async def run(run_id: str) -> Synthesis:
         if directional_winner == "tie":
             losing_items = results
             winning_items = results
+            losing_cohort = "both"
+            winning_cohort = "both"
         else:
             winning_items = by_cohort[directional_winner]
-            losing_items = by_cohort[
+            losing_cohort = (
                 "variant_a" if directional_winner == "variant_b" else "variant_b"
-            ]
-        top_friction = await _cluster_friction(losing_items, "friction_points", "FRICTION POINTS")
-        worked_themes = await _cluster_friction(winning_items, "what_worked", "WHAT WORKED")
+            )
+            losing_items = by_cohort[losing_cohort]
+            winning_cohort = directional_winner
+        # Two independent Flash calls — run in parallel (~halves wall time).
+        top_friction, worked_themes = await asyncio.gather(
+            _cluster_friction(losing_items, "friction_points", "FRICTION POINTS"),
+            _cluster_friction(winning_items, "what_worked", "WHAT WORKED"),
+        )
+        _tag_cohort(top_friction, losing_cohort)
+        _tag_cohort(worked_themes, winning_cohort)
+
+        # Cluster work done — now we need the audit's trust_level. In
+        # parallel mode this awaits the in-flight audit task; in legacy mode
+        # it reads from state.
+        audit = await _resolve_audit(run_id, audit_task)
+        await state.set_status(run_id, "synthesizing")
 
         summary_raw = await generate(
             model=MODEL_FLASH,
@@ -322,7 +414,7 @@ async def run(run_id: str) -> Synthesis:
                 winner=directional_winner,
                 gap=gap,
                 significance=gap_significance,
-                trust=run.audit.trust_level,
+                trust=audit.trust_level,
                 a_overall=cohort_overall.get("variant_a", 0.0),
                 b_overall=cohort_overall.get("variant_b", 0.0),
                 themes="\n".join(f"- {t.theme} ({t.count})" for t in top_friction[:3]) or "- (none)",

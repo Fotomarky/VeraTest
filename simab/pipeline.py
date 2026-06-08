@@ -45,25 +45,52 @@ async def _run_simulators(run_id: str) -> None:
 
 
 async def run_pipeline(run_id: str) -> None:
-    """Top-level entrypoint. Runs the five phases sequentially."""
+    """Top-level entrypoint. Runs the user-visible phases sequentially, then
+    fires fidelity as a background task so the user-visible report lands
+    ~60s sooner. The Phoenix annotations + drift dataset are enriched
+    asynchronously and the fidelity slice is written when ready."""
     log.info(f"[{run_id}] pipeline start")
     try:
         with run_session(run_id):
             await normalizer.run(run_id)
             await scenarios.run(run_id)
             await _run_simulators(run_id)
-            await auditor.run(run_id)
-            await synthesizer.run(run_id)
+            # Audit + synthesize concurrently. The synthesizer's cluster work
+            # doesn't need the audit; only its final summary call does. It
+            # awaits `audit_task` internally just before that call, so audit
+            # runs in parallel with the clustering for ~25s of wall savings.
+            audit_task = asyncio.create_task(auditor.run(run_id))
+            try:
+                await synthesizer.run(run_id, audit_task=audit_task)
+            except Exception:
+                if not audit_task.done():
+                    audit_task.cancel()
+                raise
+            # Synth awaits the task internally, but guard against any path
+            # that lets it return without consuming the result.
+            if not audit_task.done():
+                await audit_task
             await narrative.run(run_id)
-            await fidelity.run(run_id)  # Phase 7 — owns the terminal status
+            await state.set_status(run_id, "complete")
         log.info(f"[{run_id}] pipeline complete")
         await _notify_completion(run_id)
+        asyncio.create_task(_run_fidelity_async(run_id))
     except Exception as e:
         log.exception(f"[{run_id}] pipeline failed: {e}")
         await state.set_status(run_id, "failed", error=str(e))
         raise
     finally:
         ratelimit.notify_run_finished()
+
+
+async def _run_fidelity_async(run_id: str) -> None:
+    """Run fidelity off the critical path. Never touches run.status — the
+    run is already 'complete' before this fires. Failures are logged but
+    do not surface to the user."""
+    try:
+        await fidelity.run(run_id)
+    except Exception as e:
+        log.warning(f"[{run_id}] fidelity (background) failed (non-fatal): {e}")
 
 
 async def _notify_completion(run_id: str) -> None:

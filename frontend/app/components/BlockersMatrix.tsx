@@ -1,11 +1,14 @@
 "use client";
 import { useState } from "react";
 
+type QuoteSource = { quote: string; agent_idx?: number | null; segment?: string | null };
+
 type FrictionTheme = {
   theme: string;
   count: number;
   severity: "high" | "medium" | "low";
-  example_quotes: string[];
+  example_quotes: QuoteSource[];
+  cohort?: "variant_a" | "variant_b" | "both";
 };
 
 type SimResult = {
@@ -26,6 +29,7 @@ type Props = {
   foggAvg: Record<string, Record<string, number>>;
   winner: string;
   simulationResults: SimResult[];
+  isSingleScreen?: boolean;
 };
 
 function getFoggBadge(
@@ -94,6 +98,25 @@ const SEV_STYLES: Record<
 
 const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
+// Render a tiny "A" / "B" chip identifying which variant a theme came from.
+// Hidden in single-screen mode and when the synthesizer couldn't attribute it.
+function CohortChip({ cohort }: { cohort?: "variant_a" | "variant_b" | "both" }) {
+  if (!cohort || cohort === "both") return null;
+  const label = cohort === "variant_a" ? "A" : "B";
+  const cls =
+    cohort === "variant_a"
+      ? "bg-sky-50 border-sky-200 text-sky-700"
+      : "bg-violet-50 border-violet-200 text-violet-700";
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${cls}`}
+      title={`From variant ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export default function BlockersMatrix({
   topFriction,
   whatWorkedThemes,
@@ -101,6 +124,7 @@ export default function BlockersMatrix({
   foggAvg,
   winner,
   simulationResults,
+  isSingleScreen,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -121,7 +145,7 @@ export default function BlockersMatrix({
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5">
       <div className="flex items-baseline justify-between mb-3">
-        <h2 className="font-semibold text-sm">Conversion Blockers & Wins</h2>
+        <h2 className="font-semibold text-sm">🚦 Conversion Blockers & Wins</h2>
         <span className="text-xs text-neutral-400">
           {sortedFriction.length} blocker{sortedFriction.length !== 1 ? "s" : ""} ·{" "}
           {whatWorkedThemes.length} working
@@ -147,6 +171,7 @@ export default function BlockersMatrix({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sev.dot}`} />
                     <span className="text-sm font-medium">{t.theme}</span>
+                    {!isSingleScreen && <CohortChip cohort={t.cohort} />}
                     <span className="text-[10px] text-neutral-500">
                       {t.count} agent{t.count !== 1 ? "s" : ""}
                     </span>
@@ -178,11 +203,17 @@ export default function BlockersMatrix({
                 )}
               </div>
               {isOpen && hasQuotes && (
-                <div className="mt-2 space-y-1">
+                <div className="mt-2 space-y-1.5">
                   {t.example_quotes.map((q, j) => (
-                    <p key={j} className="text-xs text-neutral-600 italic">
-                      &ldquo;{q}&rdquo;
-                    </p>
+                    <div key={j} className="text-xs text-neutral-600">
+                      <span className="italic">&ldquo;{q.quote}&rdquo;</span>
+                      {(q.agent_idx != null || q.segment) && (
+                        <span className="ml-2 text-[10px] text-neutral-400 not-italic">
+                          —{q.agent_idx != null ? ` Agent #${q.agent_idx}` : ""}
+                          {q.segment ? ` (${q.segment})` : ""}
+                        </span>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

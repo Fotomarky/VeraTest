@@ -163,7 +163,7 @@ export GEMINI_API_KEY="your-key-here"
 
 # Smoke test (no API needed)
 pytest tests/ -v
-# Expected: 31 passed
+# Expected: 45 passed
 
 # Generate sample fixtures
 python tests/fixtures/make_samples.py
@@ -219,7 +219,7 @@ cd mcp && pip install -e .
 2. Insert the new phase into `pipeline.py` — update `run_pipeline()` and set the status string via `state.set_status()`
 3. Add any new output fields to the relevant model in `models.py`
 4. Add tests in `tests/`
-5. Run `pytest tests/ -v` — all 31 must pass
+5. Run `pytest tests/ -v` — all 45 must pass
 
 ---
 
@@ -254,20 +254,19 @@ Health
 
 | Component | Purpose | Single-screen behaviour |
 |---|---|---|
-| `CommandRail` | Sticky verdict rail — validity badge (left), resonance bar (center), coverage + export actions (right) | Center shows single resonance bar (X.X/10) instead of A/B tug-of-war |
-| `ArcadeTheater` | Pixelated walking agent animation while run is in-flight | Same |
-| `SprintPriorities` | Top 3 numbered friction items as actionable sprint tasks | Same |
+| `CommandRail` | Sticky verdict rail — validity badge + persona-fidelity badge (left), resonance bar (center), coverage + export actions (right) | Center shows single resonance bar (X.X/10) instead of A/B tug-of-war |
+| `ResultsHero` | "Your Audience Personas" hero — persona circles with lean rings; click to expand a `PersonaCard`. Hides the auto-injected `stress_test_*` persona | Rings encode positive/negative lean instead of A/B lean |
+| `PackmanTheater` | Pixelated walking agent animation while run is in-flight | Same |
+| `WhatToDoNext` | Blue card: `synthesis.recommendation` quote + top HIGH/MED friction as positive actions (`recommended_action`) + projected ability score target | Same |
 | `BlockersMatrix` | Unified friction + what-worked table with Fogg badges (Motiv↑/↓, Ability↑/↓) and recommended-fix hints from `metacognitive_reflection` | Same |
-| `PersonaCarousel` | Carousel of `PersonaCard` components, sorted by agent count; prev/next arrows + dot indicators | Passes `isSingleScreen` to each card |
-| `UserStoryScaffold` | "As a … I need … so that …" cards from HIGH/MED friction, copy-to-clipboard | Same |
-| `TestNextHypothesis` | Blue card with `synthesis.recommendation` quote + projected ability score target | Same |
+| `UserStoryScaffold` | "As a … I need … so that …" cards from HIGH/MED friction (positive `user_need`), copy-to-clipboard | Same |
 | `VisualEvidence` | Collapsible variant image reference (collapsed by default when confounded) | Shows only variant A in a narrow single-column grid |
 
-**`isSingleScreen`** is set on `page.tsx` as `!run.variant_b_path`. Pass this prop to `PersonaCarousel` and `VisualEvidence`.
+**`isSingleScreen`** is set on `page.tsx` as `!run.variant_b_path`. Pass this prop to `ResultsHero` and `VisualEvidence`.
 
 **`CommandRail` single-screen detection:** `isSingleScreen = isComplete && scoreA > 0 && scoreB === 0` (compute AFTER `isComplete` is defined).
 
-**`computeFoggAvg(results)`** in `page.tsx` derives per-cohort resonance averages from `SimResult.resonance` — there is no `fogg_avg` on the backend `Synthesis` model. Pass the result to `BlockersMatrix` and `TestNextHypothesis`.
+**`computeFoggAvg(results)`** in `page.tsx` derives per-cohort resonance averages from `SimResult.resonance` — there is no `fogg_avg` on the backend `Synthesis` model. Pass the result to `BlockersMatrix` and `WhatToDoNext`.
 
 **CommandRail balance bar (A/B only):** converts `cohort_resonance_overall` raw scores (e.g. 5.8 vs 7.2) into relative percentages (`scoreA / (scoreA + scoreB)`), not vote counts.
 

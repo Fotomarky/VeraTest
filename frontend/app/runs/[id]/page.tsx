@@ -2,11 +2,10 @@
 import { useEffect, useState } from "react";
 import PackmanTheater from "../../components/PackmanTheater";
 import CommandRail from "../../components/CommandRail";
-import SprintPriorities from "../../components/SprintPriorities";
+import WhatToDoNext from "../../components/WhatToDoNext";
 import BlockersMatrix from "../../components/BlockersMatrix";
-import PersonaCarousel from "../../components/PersonaCarousel";
+import ResultsHero from "../../components/ResultsHero";
 import UserStoryScaffold from "../../components/UserStoryScaffold";
-import TestNextHypothesis from "../../components/TestNextHypothesis";
 import VisualEvidence from "../../components/VisualEvidence";
 
 type ScenarioCard = {
@@ -61,19 +60,28 @@ type Run = {
       theme: string;
       count: number;
       severity: "high" | "medium" | "low";
-      example_quotes: string[];
+      example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
+      cohort?: "variant_a" | "variant_b" | "both";
     }>;
     what_worked_themes: Array<{
       theme: string;
       count: number;
       severity: "high" | "medium" | "low";
-      example_quotes: string[];
+      example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
+      cohort?: "variant_a" | "variant_b" | "both";
     }>;
     one_line_summary?: string;
     recommendation?: string;
     confound_warning?: string;
     trust_signal_gaps?: string[];
   };
+  fidelity?: {
+    persona_consistency: number;
+    agents_drifted: number;
+    rationale_coherence?: number;
+    agents_incoherent?: number;
+    drifted_agent_indices?: number[];
+  } | null;
   error?: string;
 };
 
@@ -84,6 +92,8 @@ const PHASE_LABELS: Record<string, string> = {
   simulating: "Running simulation agents in parallel",
   auditing: "Auditing — checking for bias and confidence collapse",
   synthesizing: "Synthesising final report — clustering friction themes",
+  narrating: "Narrating — writing structural diff, hypothesis and cohort story",
+  calibrating: "Calibrating — measuring persona fidelity (LLM-as-a-Judge)",
   complete: "Complete",
   failed: "Failed",
 };
@@ -95,6 +105,8 @@ const PHASE_ORDER = [
   "simulating",
   "auditing",
   "synthesizing",
+  "narrating",
+  "calibrating",
 ] as const;
 
 const PHASE_SHORT: Record<string, string> = {
@@ -104,6 +116,8 @@ const PHASE_SHORT: Record<string, string> = {
   simulating: "Simulate",
   auditing: "Audit",
   synthesizing: "Synthesise",
+  narrating: "Narrate",
+  calibrating: "Calibrate",
 };
 
 function computeFoggAvg(results: SimResult[]): Record<string, Record<string, number>> {
@@ -141,6 +155,45 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     let cancelled = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    // The fidelity slice is written by a background task a few seconds AFTER
+    // the run flips to 'complete'. Keep polling briefly past completion so the
+    // persona-fidelity badge appears without a manual refresh, but bound it so
+    // we don't poll forever if Phoenix/fidelity never lands.
+    let postCompletePolls = 0;
+    const MAX_POST_COMPLETE_POLLS = 15;
+
+    const stopPolling = () => {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const startPolling = (intervalMs: number) => {
+      if (pollTimer !== null) return;
+      pollTimer = setInterval(async () => {
+        if (cancelled) return;
+        try {
+          const res = await fetch(`/api/runs/${params.id}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          if (cancelled) return;
+          setRun(data);
+          if (data.status === "failed") {
+            stopPolling();
+          } else if (data.status === "complete") {
+            if (data.fidelity != null || postCompletePolls >= MAX_POST_COMPLETE_POLLS) {
+              stopPolling();
+            } else {
+              postCompletePolls++;
+            }
+          }
+        } catch {}
+      }, intervalMs);
+    };
+
+    // Initial fetch
     fetch(`/api/runs/${params.id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -154,16 +207,22 @@ export default function RunPage({ params }: { params: { id: string } }) {
         setRun(JSON.parse(e.data));
       } catch {}
     });
+    // Safety-net poll runs alongside SSE at a slow cadence. SSE delivers
+    // sub-second updates when it's healthy; the poll catches silently-dropped
+    // events on flaky paths (Cloud Run idle close, proxy buffering) so the
+    // phase pill always catches up within a few seconds.
+    startPolling(5000);
     source.onerror = () => {
-      fetch(`/api/runs/${params.id}`)
-        .then((r) => r.json())
-        .then(setRun)
-        .catch(() => {});
       source.close();
+      // SSE confirmed dead — speed up the poll so updates stay responsive.
+      stopPolling();
+      startPolling(2000);
     };
+
     return () => {
       cancelled = true;
       source.close();
+      stopPolling();
     };
   }, [params.id]);
 
@@ -192,7 +251,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
         </div>
         <CommandRail
           synthesis={null}
-          audit={null}
           runId={params.id}
           status="pending"
           onCopyMarkdown={copyMarkdown}
@@ -233,12 +291,23 @@ export default function RunPage({ params }: { params: { id: string } }) {
 
       <CommandRail
         synthesis={synth ?? null}
-        audit={run.audit ?? null}
+        fidelity={run.fidelity ?? null}
+        totalAgents={run.simulation_results?.length ?? 0}
         runId={run.run_id}
         status={run.status}
         onCopyMarkdown={copyMarkdown}
         copied={copied}
       />
+
+      {synth && uniquePersonas.length > 0 && (
+        <ResultsHero
+          runId={run.run_id}
+          personas={uniquePersonas}
+          resultsBySegment={resultsBySegment}
+          winner={winner}
+          isSingleScreen={isSingleScreen}
+        />
+      )}
 
       {inProgress && (
         <PackmanTheater
@@ -262,9 +331,12 @@ export default function RunPage({ params }: { params: { id: string } }) {
       )}
 
       {synth && (
-        <SprintPriorities
+        <WhatToDoNext
           topFriction={synth.top_friction ?? []}
           recommendation={synth.recommendation}
+          foggAvg={foggAvg}
+          winner={winner}
+          simulationResults={run.simulation_results ?? []}
           confoundWarning={synth.confound_warning}
           totalAgents={run.simulation_results?.length ?? total}
           personaCount={uniquePersonas.length}
@@ -279,34 +351,24 @@ export default function RunPage({ params }: { params: { id: string } }) {
           foggAvg={foggAvg}
           winner={winner}
           simulationResults={run.simulation_results ?? []}
-        />
-      )}
-
-      {uniquePersonas.length > 0 && (
-        <PersonaCarousel
-          personas={uniquePersonas}
-          resultsBySegment={resultsBySegment}
-          winner={winner}
           isSingleScreen={isSingleScreen}
         />
       )}
 
       {synth && (
-        <UserStoryScaffold
-          topFriction={synth.top_friction ?? []}
-          whatWorkedThemes={synth.what_worked_themes ?? []}
-          goal={run.goal}
-          resultsBySegment={resultsBySegment}
-        />
-      )}
-
-      {synth?.recommendation && (
-        <TestNextHypothesis
-          recommendation={synth.recommendation}
-          foggAvg={foggAvg}
-          winner={winner}
-          simulationResults={run.simulation_results ?? []}
-        />
+        <details className="rounded-lg border border-neutral-200 bg-white">
+          <summary className="cursor-pointer px-5 py-3 text-sm font-semibold select-none">
+            Copy to backlog — user stories
+          </summary>
+          <div className="px-5 pb-5">
+            <UserStoryScaffold
+              topFriction={synth.top_friction ?? []}
+              whatWorkedThemes={synth.what_worked_themes ?? []}
+              goal={run.goal}
+              resultsBySegment={resultsBySegment}
+            />
+          </div>
+        </details>
       )}
 
       <VisualEvidence

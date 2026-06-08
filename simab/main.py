@@ -154,26 +154,44 @@ async def stream_run(run_id: str):
     """Server-Sent Events stream of run progress.
 
     Polls the DB every second and emits the full run state until status
-    is complete or failed.
+    is complete or failed. Bounded by a 25-minute wall-clock (Cloud Run
+    request timeout is 30 min). EventSourceResponse sends ping comments
+    every 15s so idle connections aren't reaped by intermediaries.
     """
+    MAX_SECONDS = 25 * 60  # 1500s — leaves headroom below Cloud Run's 30m
+
     async def event_generator():
         last_hash = None
-        for _ in range(600):  # max 10 minutes
+        elapsed = 0
+        # Fidelity is computed in a background task that finishes a few
+        # seconds AFTER the run flips to 'complete'. Hold the stream open a
+        # bounded grace period past completion so the final 'update' carries
+        # the fidelity slice (the persona-consistency badge) — otherwise the
+        # client would have to manually refresh to see it.
+        grace = 0
+        FIDELITY_GRACE_SECONDS = 45
+        while elapsed < MAX_SECONDS:
             run = await state.get_run(run_id)
             if run is None:
                 yield {"event": "error", "data": json.dumps({"error": "run not found"})}
                 return
             payload = run.model_dump_json()
-            # Only emit if state changed
             payload_hash = hash(payload)
             if payload_hash != last_hash:
                 yield {"event": "update", "data": payload}
                 last_hash = payload_hash
-            if run.status in ("complete", "failed"):
+            if run.status == "failed":
                 return
+            if run.status == "complete":
+                if run.fidelity is not None or grace >= FIDELITY_GRACE_SECONDS:
+                    return
+                grace += 1
             await asyncio.sleep(1)
+            elapsed += 1
 
-    return EventSourceResponse(event_generator())
+    # ping=15 emits an SSE comment every 15s so the connection stays
+    # warm even when there's no state change (long synthesizer phase etc).
+    return EventSourceResponse(event_generator(), ping=15)
 
 
 @app.get("/api/personas")

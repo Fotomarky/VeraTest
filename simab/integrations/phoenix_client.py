@@ -144,17 +144,33 @@ def append_drifted_agents(
         )
 
 
-def log_span_evaluations(eval_name: str, df) -> None:
-    """Attach Span Evaluations (a pandas DataFrame indexed by span_id) to
-    existing traces. The DataFrame should contain at minimum a `score` or
-    `label` column plus the span_id index per Phoenix's eval schema."""
+def log_span_evaluations(
+    eval_name: str, df, annotator_kind: str = "LLM",
+) -> None:
+    """Attach span annotations (Phoenix's evaluation rows) to existing
+    traces. The DataFrame must contain a `span_id` column (or a column
+    named `context.span_id` — we rename) plus any of `label`, `score`,
+    `explanation`.
+
+    Phoenix v2.x renamed the API: `client.log_evaluations(SpanEvaluations(..))`
+    became `client.spans.log_span_annotations_dataframe(...)`.
+    """
     client = _get_client()
     if client is None:
         return
     try:
-        from phoenix.trace import SpanEvaluations
-        client.log_evaluations(
-            SpanEvaluations(eval_name=eval_name, dataframe=df)
+        import pandas as pd
+        df = df.copy()
+        if "context.span_id" in df.columns and "span_id" not in df.columns:
+            df = df.rename(columns={"context.span_id": "span_id"})
+        # Drop rows with empty/missing span_id — Phoenix rejects those.
+        df = df[df["span_id"].astype(bool)] if "span_id" in df.columns else df
+        if df.empty:
+            return
+        client.spans.log_span_annotations_dataframe(
+            dataframe=df,
+            annotation_name=eval_name,
+            annotator_kind=annotator_kind,
         )
     except Exception as e:
         log.warning(f"Failed to log span evaluations '{eval_name}': {e}")

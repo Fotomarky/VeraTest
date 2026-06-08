@@ -56,7 +56,9 @@ expert" voice?
 Respond with exactly one word: "in_character" or "drifted".
 """
 
-RAILS = ["in_character", "drifted"]
+# Choices format for arize-phoenix-evals v3.x create_classifier:
+# {label: score}. Higher score = better — "in_character" maps to 1.
+PERSONA_CHOICES = {"in_character": 1.0, "drifted": 0.0}
 
 
 # Deterministic markers for the code-based coherence check.
@@ -89,16 +91,46 @@ def _is_incoherent(sr: SimResult) -> bool:
     return False
 
 
-# Thin re-exports so tests can patch these at this module's namespace
-# without needing arize-phoenix-evals installed at import time.
-def llm_classify(*args, **kwargs):  # pragma: no cover - real-Phoenix path
-    from phoenix.evals import llm_classify as _llm_classify
-    return _llm_classify(*args, **kwargs)
+# Tests patch this single seam — keeps the agent's logic independent of
+# the arize-phoenix-evals install. Real Phoenix path uses v3.x API:
+#   LLM + create_classifier + evaluate_dataframe.
+def llm_classify(df):  # pragma: no cover - real-Phoenix path
+    """Run the persona-consistency classifier over `df` and return a
+    DataFrame with `label` and `explanation` columns aligned to `df` rows."""
+    from phoenix.evals import LLM, create_classifier, evaluate_dataframe
 
-
-def _gemini_model():  # pragma: no cover - real-Phoenix path
-    from phoenix.evals import GeminiModel
-    return GeminiModel(model="gemini-2.5-flash")
+    # Flash-Lite is enough for yes/no classification and has 1500/day free
+    # tier vs Flash's 20/day — keeps the demo unblocked on free tier.
+    llm = LLM(provider="google", model="gemini-2.5-flash-lite")
+    classifier = create_classifier(
+        name="persona_consistency",
+        prompt_template=PERSONA_CONSISTENCY_TEMPLATE,
+        llm=llm,
+        choices=PERSONA_CHOICES,
+        direction="maximize",
+    )
+    out = evaluate_dataframe(
+        dataframe=df,
+        evaluators=[classifier],
+        hide_tqdm_bar=True,
+    )
+    # Normalise the output to {label, explanation} columns regardless of
+    # which exact column names this version of phoenix-evals emits.
+    label_col = next(
+        (c for c in out.columns if c.endswith("label") or c == "label"),
+        None,
+    )
+    expl_col = next(
+        (c for c in out.columns
+         if c.endswith("explanation") or c.endswith("rationale")
+         or c == "explanation"),
+        None,
+    )
+    result = pd.DataFrame({
+        "label": out[label_col] if label_col else "in_character",
+        "explanation": out[expl_col] if expl_col else "",
+    })
+    return result.reset_index(drop=True)
 
 
 def _build_persona_summary(scenario) -> str:
@@ -114,12 +146,16 @@ def _build_persona_summary(scenario) -> str:
 
 
 async def run(run_id: str) -> None:
-    """Phase 7 entry point. See module docstring for the contract."""
-    await state.set_status(run_id, "calibrating")
+    """Phase 7 entry point. See module docstring for the contract.
+
+    Runs off the critical path (pipeline.py marks status=complete after
+    narrative). This agent only writes its own fidelity slice + Phoenix
+    annotations + the cross-run drift dataset; it must not touch
+    run.status.
+    """
     run = await state.get_run(run_id)
     if run is None or not run.simulation_results:
         log.warning(f"[{run_id}] FidelityAuditor: no sim results, skipping")
-        await state.set_status(run_id, "complete")
         return
 
     scenarios_by_id = {s.id: s for s in run.scenarios}
@@ -142,14 +178,7 @@ async def run(run_id: str) -> None:
 
     # ── 2. LLM-as-a-Judge: persona consistency ───────────────────────────
     try:
-        results = llm_classify(
-            data=df,
-            model=_gemini_model(),
-            template=PERSONA_CONSISTENCY_TEMPLATE,
-            rails=RAILS,
-            provide_explanation=True,
-            concurrency=6,
-        )
+        results = llm_classify(df)
     except Exception as e:
         log.warning(
             f"[{run_id}] llm_classify failed — defaulting all to in_character "
@@ -197,6 +226,7 @@ async def run(run_id: str) -> None:
     log_span_evaluations(
         eval_name="rationale_coherence",
         df=pd.DataFrame(coh_rows),
+        annotator_kind="CODE",  # deterministic rule, not an LLM
     )
 
     # ── 4. Append drifted rows to the cross-run Phoenix Dataset ──────────
@@ -226,7 +256,6 @@ async def run(run_id: str) -> None:
         drifted_agent_indices=drifted_idx,
     )
     await state.write_fidelity(run_id, report)
-    await state.set_status(run_id, "complete")
     log.info(
         f"[{run_id}] fidelity: persona_consistency={persona_consistency:.2f} "
         f"coherence={rationale_coherence:.2f} "

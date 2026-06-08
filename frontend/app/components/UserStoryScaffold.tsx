@@ -5,7 +5,10 @@ type FrictionTheme = {
   theme: string;
   count: number;
   severity: "high" | "medium" | "low";
-  example_quotes: string[];
+  example_quotes: Array<{ quote: string; agent_idx?: number | null; segment?: string | null }>;
+  cohort?: "variant_a" | "variant_b" | "both";
+  recommended_action?: string;
+  user_need?: string;
 };
 
 type SimResult = {
@@ -21,19 +24,6 @@ type Props = {
   goal: string;
   resultsBySegment: Map<string, SimResult[]>;
 };
-
-function themeToNeed(theme: string): string {
-  const lower = theme.toLowerCase();
-  if (/\bmissing\b/.test(lower) || /\black of\b/.test(lower)) {
-    const stripped = theme.replace(/^(missing|lack of)\s*/i, "").trim();
-    return stripped || theme;
-  }
-  if (/\bvague\b/.test(lower) || /\bunclear\b/.test(lower)) {
-    const stripped = theme.replace(/^(vague|unclear)\s*/i, "").trim();
-    return stripped ? "a clearer " + stripped : theme;
-  }
-  return theme;
-}
 
 function findPrimaryPersona(
   theme: FrictionTheme,
@@ -61,6 +51,13 @@ function findPrimaryPersona(
 
   const top = Object.entries(segmentCounts).sort(([, a], [, b]) => b - a)[0];
   return top ? top[0] : "a user";
+}
+
+// Personas often start with "The " (e.g. "The Strategic Growth Seeker") —
+// since the template prepends "As a ", that produces "As a The ...".
+// Strip a leading article so the sentence reads naturally.
+function cleanPersona(name: string): string {
+  return name.replace(/^\s*(?:the|a|an)\s+/i, "").trim() || name;
 }
 
 const SEV_BORDER: Record<string, string> = {
@@ -97,15 +94,17 @@ export default function UserStoryScaffold({
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5">
       <div className="mb-3">
-        <h2 className="font-semibold text-sm">User Stories to Write</h2>
+        <h2 className="font-semibold text-sm">📝 User Stories to Write</h2>
         <p className="text-xs text-neutral-400 mt-0.5">
           Generated from simulation findings — copy directly to your backlog.
         </p>
       </div>
       <div className="space-y-3">
         {highMed.map((t, i) => {
-          const persona = findPrimaryPersona(t, resultsBySegment);
-          const need = themeToNeed(t.theme);
+          const persona = cleanPersona(findPrimaryPersona(t, resultsBySegment));
+          // Prefer the LLM-authored positive need; fall back to the verbatim
+          // theme for pre-existing runs that lack the field.
+          const need = t.user_need?.trim() || `${t.theme} resolved`;
           const text = `As a ${persona},\nI need ${need},\nso that I can ${goal}.`;
           const key = `friction-${i}`;
           return (
@@ -134,7 +133,7 @@ export default function UserStoryScaffold({
         })}
 
         {topWorked.map((t, i) => {
-          const persona = findPrimaryPersona(t, resultsBySegment);
+          const persona = cleanPersona(findPrimaryPersona(t, resultsBySegment));
           const text = `✅ As a ${persona}, ${t.theme} supports ${goal} —\n   preserve this in the next iteration.`;
           const key = `worked-${i}`;
           return (

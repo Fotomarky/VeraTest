@@ -140,6 +140,26 @@ def test_scenario_card_validates():
     assert sc.communication_style == ""
 
 
+def test_friction_theme_phrasing_fields():
+    # New runs carry LLM-authored action/need phrasings…
+    ft = FrictionTheme(
+        theme="Vague features & lack of use cases",
+        count=9,
+        severity="high",
+        recommended_action="Add concrete use cases and tighten feature copy",
+        user_need="clear features with concrete use cases",
+    )
+    assert ft.recommended_action == "Add concrete use cases and tighten feature copy"
+    assert ft.user_need == "clear features with concrete use cases"
+    # …and they survive a serialization round-trip.
+    reloaded = FrictionTheme.model_validate_json(ft.model_dump_json())
+    assert reloaded.user_need == ft.user_need
+    # Pre-existing runs (fields absent) default to empty for graceful fallback.
+    legacy = FrictionTheme(theme="t", count=1)
+    assert legacy.recommended_action == ""
+    assert legacy.user_need == ""
+
+
 def test_brief_serializes():
     brief = Brief(
         conversion_goal="g",

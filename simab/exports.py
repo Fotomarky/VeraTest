@@ -186,7 +186,9 @@ def to_markdown(run: Run, share_url: Optional[str] = None) -> str:
             sev_marker = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(t.severity, "·")
             lines.append(f"- {sev_marker} **{t.theme}** ({t.count} mentions)")
             if t.example_quotes:
-                lines.append(f"  > _\"{t.example_quotes[0]}\"_")
+                q = t.example_quotes[0]
+                attribution = f" — agent #{q.agent_idx}" if q.agent_idx is not None else ""
+                lines.append(f"  > _\"{q.quote}\"_{attribution}")
         lines.append("")
 
     # Segment splits (per-segment resonance overall, per cohort)
