@@ -42,7 +42,7 @@ type Props = {
   isSingleScreen: boolean;
 };
 
-const STYLE_ICON: Record<string, string> = { analytical: "📊", impulse: "⚡", cautious: "🔍", social: "💬" };
+const STYLE_ICON: Record<string, string> = { analytical: "🧑‍💻", impulse: "🏃", cautious: "🕵️", social: "💁" };
 const DEVICE_ICON: Record<string, string> = { desktop: "🖥", mobile: "📱", tablet: "📲" };
 
 function cleanPersona(name: string): string {
@@ -109,7 +109,7 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
           {/* Persona circles */}
           <div>
             <div className="text-[11px] uppercase tracking-wide text-neutral-400 mb-3">
-              Who tested it · {totalAgents} agents across {sorted.length} persona{sorted.length !== 1 ? "s" : ""}
+              👥 Your Audience Personas · {totalAgents} agents across {sorted.length} segment{sorted.length !== 1 ? "s" : ""}
             </div>
             <div className="flex gap-5 flex-wrap">
               {sorted.map((p) => {

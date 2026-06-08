@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" />
   <img src="https://img.shields.io/badge/Arize-Phoenix%20Observability-7C3AED?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Gemini-Flash%20%7C%20Flash--Lite-4285F4?style=for-the-badge&logo=google&logoColor=white" />
-  <img src="https://img.shields.io/badge/Tests-31%20passing-22C55E?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Tests-45%20passing-22C55E?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge" />
   <img src="https://img.shields.io/badge/MCP-native-0EA5E9?style=for-the-badge" />
 </p>
@@ -53,17 +53,17 @@ Start with a single design analysis — it's the fastest way to understand your 
 
 Every run produces a **PM Command Center** — a single-page report structured around the decisions a PM actually needs to make:
 
-**CommandRail** — top of page, always visible. Validity badge, overall resonance score (or A vs B tug-of-war), coverage %, and a one-click markdown export for Notion or Linear.
+**CommandRail** — top of page, always visible. Validity badge, persona-fidelity badge ("18/20 in persona"), overall resonance score (or A vs B tug-of-war), coverage %, and a one-click markdown export for Notion or Linear.
 
-**Sprint Priorities** — top 3 friction themes formatted as sprint tickets, ranked by severity and agent count. Copy them straight into your backlog.
+**Your Audience Personas** — a PageSpeed-style hero of persona circles, one per audience segment, each ring showing its lean (positive/negative, or A/B). Click any circle to expand its full 6-dimension resonance breakdown, trust signals, and which variant it preferred.
 
-**Blockers & Wins table** — every friction point and what-worked theme in one table. Each row tagged with the cognitive dimension it hits (Motivation↑/↓, Ability↑/↓) and a recommended fix pulled from the agents' metacognitive reflections.
+**What to do next** — the single recommendation plus the top high/medium friction items rephrased as positive, shippable actions ("Add concrete use cases"), each tagged with the agent count it affects and a projected ability-score target.
 
-**Persona Carousel** — scroll through each audience segment. See their 6-dimension resonance bars, trust signals found vs missing, and (in A/B mode) which variant they preferred.
+**Conversion Blockers & Wins** — every friction point and what-worked theme in one table. Each row tagged with the cognitive dimension it hits (Motivation↑/↓, Ability↑/↓) and a recommended fix pulled from the agents' metacognitive reflections.
 
-**User Story Scaffold** — "As a [persona], I need [fix] so that I can [goal]" cards auto-generated from your high and medium friction themes. Copy-to-clipboard.
+**User Stories to Write** — "As a [persona], I need [fix] so that I can [goal]" cards auto-generated from your high and medium friction themes, phrased as positive needs. Copy-to-clipboard.
 
-**Hypothesis Card** — the single highest-leverage thing to test next, with a projected ability score target.
+**Visual Reference** — collapsible variant image reference (collapsed by default when the test is confounded).
 
 ---
 
@@ -219,7 +219,7 @@ export GEMINI_API_KEY="your-key-here"
 
 # Smoke tests (no API calls needed)
 pytest tests/ -v
-# Expected: 31 passed
+# Expected: 45 passed
 
 uvicorn simab.main:app --reload --port 8000
 
@@ -272,13 +272,13 @@ frontend/
     ├── new/page.tsx               Upload form — single or A/B mode
     ├── runs/[id]/page.tsx         PM Command Center (SSE live updates)
     └── components/
-        ├── CommandRail.tsx        Sticky verdict / resonance header
+        ├── CommandRail.tsx        Sticky verdict / resonance / fidelity header
+        ├── ResultsHero.tsx        Persona-circles hero (uses PersonaCard)
+        ├── PersonaCard.tsx        Single persona's resonance + trust deep-dive
         ├── PackmanTheater.tsx     Pixelated agent animation while in-flight
-        ├── SprintPriorities.tsx   Top 3 friction as sprint tasks
+        ├── WhatToDoNext.tsx       Recommendation + positive next-step actions
         ├── BlockersMatrix.tsx     Friction + wins table with cognitive badges
-        ├── PersonaCarousel.tsx    Per-segment resonance deep-dive
         ├── UserStoryScaffold.tsx  Auto-generated user stories from friction
-        ├── TestNextHypothesis.tsx Next test recommendation card
         └── VisualEvidence.tsx     Collapsible variant image reference
 ```
 
@@ -304,7 +304,7 @@ what the agent saw and decided.
 | Frontend | Next.js 14 App Router + Tailwind CSS |
 | Deployment | Google Cloud Run (backend 2Gi/2CPU, frontend 512Mi) |
 | MCP server | Python stdio, 4 tools |
-| Tests | pytest + pytest-asyncio, 32 tests, ~1s |
+| Tests | pytest + pytest-asyncio, 45 tests, ~1s |
 
 ---
 
@@ -396,7 +396,7 @@ Ask Claude: *"Run a pretest on these two screenshots for trial signups from star
 
 ```bash
 pytest tests/ -v
-# 31 passed in ~1s
+# 45 passed in ~1s
 ```
 
 Covers: idempotent state writes under concurrent agents, schema compatibility, traffic-weighted allocator, resonance aggregation, trust gap ranking, markdown export, share-page self-containment.

@@ -27,7 +27,7 @@ export default function VisualEvidence({
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-neutral-50"
       >
-        <h2 className="font-semibold text-sm">Visual Reference</h2>
+        <h2 className="font-semibold text-sm">🖼️ Visual Reference</h2>
         <span className="text-xs text-neutral-400">{open ? "▲ hide" : "▼ show"}</span>
       </button>
 

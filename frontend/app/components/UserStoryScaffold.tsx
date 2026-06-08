@@ -94,7 +94,7 @@ export default function UserStoryScaffold({
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5">
       <div className="mb-3">
-        <h2 className="font-semibold text-sm">User Stories to Write</h2>
+        <h2 className="font-semibold text-sm">📝 User Stories to Write</h2>
         <p className="text-xs text-neutral-400 mt-0.5">
           Generated from simulation findings — copy directly to your backlog.
         </p>

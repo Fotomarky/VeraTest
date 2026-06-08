@@ -73,7 +73,7 @@ export default function WhatToDoNext({
   return (
     <section className="rounded-lg border border-blue-100 bg-blue-50 p-5">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h2 className="font-semibold text-sm text-blue-900">What to do next</h2>
+        <h2 className="font-semibold text-sm text-blue-900">🚀 What to do next</h2>
         <div className="flex items-center gap-1.5">
           {totalAgents != null && (
             <span className="text-[11px] px-2 py-0.5 rounded bg-white/70 text-blue-700 font-mono">

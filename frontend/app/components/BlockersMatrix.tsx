@@ -145,7 +145,7 @@ export default function BlockersMatrix({
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5">
       <div className="flex items-baseline justify-between mb-3">
-        <h2 className="font-semibold text-sm">Conversion Blockers & Wins</h2>
+        <h2 className="font-semibold text-sm">🚦 Conversion Blockers & Wins</h2>
         <span className="text-xs text-neutral-400">
           {sortedFriction.length} blocker{sortedFriction.length !== 1 ? "s" : ""} ·{" "}
           {whatWorkedThemes.length} working
