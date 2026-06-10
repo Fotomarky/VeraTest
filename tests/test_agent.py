@@ -22,7 +22,7 @@ def test_agent_module_imports():
 async def test_agent_runtime_unavailable_without_adk(monkeypatch):
     """launch_from_description raises a clean RuntimeError (-> 503) when the
     agent isn't built, regardless of whether google-adk is installed. The
-    /api/agent/launch endpoint maps this to a 503 so describe-mode degrades
+    /api/agent/run endpoint maps this to a 503 so describe-mode degrades
     gracefully instead of 500-ing."""
     from simab import agent as agent_mod
     from simab import agent_runtime

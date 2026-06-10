@@ -90,7 +90,9 @@ export default function NewRunPage() {
     rec.interimResults = true;
 
     // Append dictation to whatever is already typed. `base` accumulates only
-    // finalized chunks so interim updates don't duplicate text.
+    // finalized chunks so interim updates don't duplicate text. Known
+    // trade-off: `base` is captured once at mic start, so edits typed while
+    // dictation is live are overwritten by the next onresult.
     let base = description;
     rec.onstart = () => setListening(true);
     rec.onerror = () => setListening(false);
@@ -157,23 +159,11 @@ export default function NewRunPage() {
       setError(null);
       setClarification(null);
       try {
-        const up = new FormData();
-        up.append("variant_a", variantA);
-        if (variantB) up.append("variant_b", variantB);
-        const upRes = await fetch("/api/agent/upload", { method: "POST", body: up });
-        if (!upRes.ok) {
-          throw new Error(`${upRes.status}: ${(await upRes.text()).slice(0, 200)}`);
-        }
-        const paths = await upRes.json();
-        const launchRes = await fetch("/api/agent/launch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            description,
-            variant_a_path: paths.variant_a_path,
-            variant_b_path: paths.variant_b_path,
-          }),
-        });
+        const body = new FormData();
+        body.append("variant_a", variantA);
+        if (variantB) body.append("variant_b", variantB);
+        body.append("description", description);
+        const launchRes = await fetch("/api/agent/run", { method: "POST", body });
         if (!launchRes.ok) {
           throw new Error(`${launchRes.status}: ${(await launchRes.text()).slice(0, 200)}`);
         }

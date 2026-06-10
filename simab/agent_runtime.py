@@ -116,6 +116,12 @@ async def launch_from_description(
             if fr is not None and fr.name == "start_pretest":
                 resp = fr.response or {}
                 run_id = resp.get("run_id") or run_id
+        if run_id:
+            # The pipeline is already launched; the rest of the turn is the
+            # model narrating a confirmation we never show. Bail out so the
+            # browser redirects ~1-3s sooner. The session is per-request and
+            # discarded, so abandoning the turn mid-stream is safe.
+            break
         if ev.is_final_response() and ev.content:
             final_text = "".join(
                 p.text for p in ev.content.parts if getattr(p, "text", None)
