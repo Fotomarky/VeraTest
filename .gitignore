@@ -55,3 +55,5 @@ phoenix_data/
 
 # Claude Code local config / memory
 .claude/
+# Added by code-review-graph
+.code-review-graph/
