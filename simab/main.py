@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from typing import Optional
-from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from sse_starlette.sse import EventSourceResponse
@@ -76,6 +76,18 @@ async def health() -> dict:
 # REST API
 # ---------------------------------------------------------------------------
 
+def _safe_upload_name(filename: Optional[str]) -> str:
+    """Reduce a client-supplied filename to a bare basename.
+
+    Browsers send plain names, but the field is client-controlled — strip any
+    directory components so the stored path can never resolve outside
+    CONFIG.upload_dir. Note Path("..").name is ".." (not ""), so dot names
+    need an explicit reject.
+    """
+    name = Path(filename or "").name
+    return "upload.png" if name in ("", ".", "..") else name
+
+
 @app.post("/api/runs", response_model=CreateRunResponse, status_code=201)
 async def create_run(
     background_tasks: BackgroundTasks,
@@ -97,11 +109,11 @@ async def create_run(
     upload_root = Path(CONFIG.upload_dir)
     upload_root.mkdir(parents=True, exist_ok=True)
     suffix = uuid.uuid4().hex[:8]
-    a_path = upload_root / f"{suffix}_a_{variant_a.filename}"
+    a_path = upload_root / f"{suffix}_a_{_safe_upload_name(variant_a.filename)}"
     a_path.write_bytes(await variant_a.read())
     b_path_str: Optional[str] = None
     if variant_b:
-        b_path = upload_root / f"{suffix}_b_{variant_b.filename}"
+        b_path = upload_root / f"{suffix}_b_{_safe_upload_name(variant_b.filename)}"
         b_path.write_bytes(await variant_b.read())
         b_path_str = str(b_path)
 
@@ -139,66 +151,65 @@ async def create_run(
 
 # ---------------------------------------------------------------------------
 # Agent ("describe it" mode) — natural-language front door to the pipeline.
-# Two steps: upload the screenshot(s), then launch via the ADK Concierge agent.
+# One multipart turn: upload the screenshot(s) + free-text description, and the
+# ADK Concierge agent parses it and starts a pretest in a single round-trip.
 # ---------------------------------------------------------------------------
 
-@app.post("/api/agent/upload")
-async def agent_upload(
+@app.post("/api/agent/run")
+async def agent_run(
     variant_a: UploadFile,
+    description: str = Form(...),
     variant_b: Optional[UploadFile] = None,
 ) -> dict:
-    """Stash uploaded screenshot(s) and return their server-side paths.
-
-    The agent's start_pretest tool takes filesystem paths, so the browser
-    uploads here first, then passes the returned paths to /api/agent/launch.
-    """
-    if not variant_a:
-        raise HTTPException(status_code=400, detail="variant_a is required")
-    upload_root = Path(CONFIG.upload_dir)
-    upload_root.mkdir(parents=True, exist_ok=True)
-    suffix = uuid.uuid4().hex[:8]
-    a_path = upload_root / f"{suffix}_a_{variant_a.filename}"
-    a_path.write_bytes(await variant_a.read())
-    b_path_str: Optional[str] = None
-    if variant_b:
-        b_path = upload_root / f"{suffix}_b_{variant_b.filename}"
-        b_path.write_bytes(await variant_b.read())
-        b_path_str = str(b_path)
-    return {"variant_a_path": str(a_path), "variant_b_path": b_path_str}
-
-
-@app.post("/api/agent/launch")
-async def agent_launch(
-    description: str = Body(...),
-    variant_a_path: str = Body(...),
-    variant_b_path: Optional[str] = Body(None),
-) -> dict:
-    """Run one Concierge turn that parses the description and starts a pretest.
+    """Parse a free-text description + screenshot(s) and start a pretest.
 
     Returns {"run_id": ...} on success (page redirects to /runs/{id}), or
     {"needs_clarification": True, "question": ...} if the agent needs more info.
+
+    On clarification or failure no run is created, so the just-saved uploads are
+    orphans — delete them before returning so the upload dir doesn't accumulate
+    abandoned files on every retry.
     """
     description = (description or "").strip()
     if not description:
         raise HTTPException(status_code=400, detail="description is required")
-    if not variant_a_path:
-        raise HTTPException(status_code=400, detail="variant_a_path is required")
+    if not variant_a:
+        raise HTTPException(status_code=400, detail="variant_a is required")
+
+    upload_root = Path(CONFIG.upload_dir)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    suffix = uuid.uuid4().hex[:8]
+    a_path = upload_root / f"{suffix}_a_{_safe_upload_name(variant_a.filename)}"
+    a_path.write_bytes(await variant_a.read())
+    b_path: Optional[Path] = None
+    if variant_b:
+        b_path = upload_root / f"{suffix}_b_{_safe_upload_name(variant_b.filename)}"
+        b_path.write_bytes(await variant_b.read())
+
+    def _cleanup_orphans() -> None:
+        a_path.unlink(missing_ok=True)
+        if b_path is not None:
+            b_path.unlink(missing_ok=True)
 
     from . import agent_runtime
     try:
         result = await agent_runtime.launch_from_description(
-            description, variant_a_path, variant_b_path or None
+            description, str(a_path), str(b_path) if b_path else None
         )
     except Exception as e:
         # Surface the real cause to the UI instead of an opaque 500 — the agent
         # turn can fail on Vertex auth, model errors, or an MCP tool hiccup.
-        log.exception("agent launch failed")
+        _cleanup_orphans()
+        log.exception("agent run failed")
         raise HTTPException(
             status_code=503, detail=f"{type(e).__name__}: {e}"[:400]
         )
 
     if result.get("run_id"):
         result["dashboard_url"] = f"{CONFIG.frontend_url}/runs/{result['run_id']}"
+    else:
+        # needs_clarification — uploads are orphaned until the user retries.
+        _cleanup_orphans()
     return result
 
 
