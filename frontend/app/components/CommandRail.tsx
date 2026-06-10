@@ -123,8 +123,11 @@ export default function CommandRail({
                   style={{ width: `${(scoreA / 10) * 100}%` }}
                 />
               </div>
-              <span className="text-[11px] font-medium text-neutral-700 whitespace-nowrap">
-                {scoreA.toFixed(1)}/10 resonance
+              <span
+                className="text-[11px] font-medium text-neutral-700 whitespace-nowrap cursor-help"
+                title="Scores how much the page resonates with the audience"
+              >
+                {scoreA.toFixed(1)}/10 audience fit
               </span>
             </div>
           ) : isComplete ? (
