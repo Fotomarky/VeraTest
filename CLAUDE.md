@@ -145,6 +145,7 @@ If a run gets stuck in `simulating`, lower `SIMAB_SIM_CONCURRENCY` (default 6).
 | `SIMAB_UPLOAD_DIR` | `./uploads` | Where variant images are stored |
 | `SIMAB_SIM_CONCURRENCY` | `6` | Max parallel sim agents |
 | `SIMAB_NUM_AGENTS` | `20` | Total sim agents per run |
+| `SIMAB_SIM_QUORUM` | `0.7` | Min fraction of sims that must complete or the run fails loudly (no thin-panel verdicts) |
 | `FRONTEND_URL` | `http://localhost:3000` | Used in share URLs |
 | `PHOENIX_COLLECTOR_ENDPOINT` | — | Optional: Arize Phoenix OTLP endpoint (tracing) |
 | `PHOENIX_BASE_URL` | — | Agent layer: Phoenix instance the `@arizeai/phoenix-mcp` server queries (e.g. `https://app.phoenix.arize.com`) |
@@ -167,7 +168,7 @@ export GEMINI_API_KEY="your-key-here"
 
 # Smoke test (no API needed)
 pytest tests/ -v
-# Expected: 45 passed
+# Expected: 60 passed
 
 # Generate sample fixtures
 python tests/fixtures/make_samples.py
@@ -223,7 +224,7 @@ cd mcp && pip install -e .
 2. Insert the new phase into `pipeline.py` — update `run_pipeline()` and set the status string via `state.set_status()`
 3. Add any new output fields to the relevant model in `models.py`
 4. Add tests in `tests/`
-5. Run `pytest tests/ -v` — all 45 must pass
+5. Run `pytest tests/ -v` — all 60 must pass
 
 ---
 

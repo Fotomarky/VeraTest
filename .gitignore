@@ -57,3 +57,6 @@ phoenix_data/
 .claude/
 # Added by code-review-graph
 .code-review-graph/
+
+# Validation harness resume checkpoints (transient)
+validation/checkpoint_*.json

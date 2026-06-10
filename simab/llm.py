@@ -20,7 +20,15 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+import random
+
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from google import genai
 from google.genai import types
 
@@ -129,10 +137,38 @@ def _strip_json_fences(text: str) -> str:
     return text
 
 
+def _is_capacity_error(e: BaseException) -> bool:
+    """True for Gemini capacity/quota errors (503 overloaded, 429 exhausted)."""
+    s = str(e)
+    return any(tok in s for tok in (
+        "503", "UNAVAILABLE", "overloaded", "high demand",
+        "429", "RESOURCE_EXHAUSTED",
+    ))
+
+
+_wait_transient = wait_exponential(multiplier=2, min=5, max=60)
+
+
+def _wait_capacity_aware(retry_state: RetryCallState) -> float:
+    """Longer, jittered backoff for capacity errors.
+
+    503 "high demand" means the model is saturated — retrying on the standard
+    5-60s curve just re-joins the stampede and burns attempts (this is what
+    degraded 12/20 validation runs to abstention on 2026-06-10). Capacity
+    errors wait 15s-90s with full jitter to decorrelate the 20 parallel sims;
+    everything else keeps the original curve.
+    """
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if exc is not None and _is_capacity_error(exc):
+        cap = min(90.0, 15.0 * (2 ** (retry_state.attempt_number - 1)))
+        return random.uniform(cap * 0.5, cap)
+    return _wait_transient(retry_state)
+
+
 @retry(
     retry=retry_if_exception_type(Exception),
     stop=stop_after_attempt(6),
-    wait=wait_exponential(multiplier=2, min=5, max=60),
+    wait=_wait_capacity_aware,
     reraise=True,
 )
 async def generate(

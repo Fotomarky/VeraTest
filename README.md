@@ -432,10 +432,45 @@ Ask Claude: *"Run a pretest on these two screenshots for trial signups from star
 
 ```bash
 pytest tests/ -v
-# 45 passed in ~1s
+# 60 passed in ~2s
 ```
 
-Covers: idempotent state writes under concurrent agents, schema compatibility, traffic-weighted allocator, resonance aggregation, trust gap ranking, markdown export, share-page self-containment.
+Covers: idempotent state writes under concurrent agents, schema compatibility, traffic-weighted allocator, resonance aggregation, trust gap ranking, markdown export, share-page self-containment, and the describe-mode HTTP surface (upload sanitization, orphan cleanup, agent-unavailable degradation).
+
+---
+
+## Validation
+
+Most AI evaluation tools ask you to trust them. VeraTest ships a falsifiable benchmark you can re-run yourself.
+
+### The harness
+
+`validation/run.py` scores the full 20-agent pipeline against real A/B tests with publicly documented winners ([abtestcases.com](https://www.abtestcases.com)), alongside four baselines:
+
+| Baseline | What it controls for |
+|---|---|
+| `random` | Floor — is anything better than a coin flip? |
+| `always_a` / `always_b` | Position bias — published A/B cases skew toward B winning (publication bias) |
+| `heuristic` | "The challenger usually wins" shortcut |
+| `oneshot_gemini` | **The one that matters:** same model, same images, single prompt — isolates the value of the multi-agent panel itself |
+
+The dataset uses **mirrored pairs** — every case appears twice with A/B swapped — so a method can't score above 50% by exploiting position or publication bias. On the balanced set, `always_a`, `always_b`, and `heuristic` all land at exactly 50%, which is the design working.
+
+```bash
+python validation/run.py --dataset validation/dataset_balanced.csv --baselines all
+```
+
+Predictions checkpoint after every case, so an interrupted run resumes instead of restarting; abstentions are re-attempted automatically.
+
+### What the numbers say
+
+On the 20-case balanced set (2026-06-10 run, free-tier Gemini under heavy 503 capacity pressure):
+
+- **When VeraTest committed to a verdict, it was right 7 of 8 (87.5%)** vs one-shot Gemini's 60% — small n, treat as a directional signal, not a benchmark claim.
+- **One confident error in 20 cases.** One-shot Gemini, which always answers, was confidently wrong 8 times. Under degraded conditions VeraTest abstains ("tie") rather than fabricating a verdict — for a decision-support tool, refusing to guess *is* the correct behavior, and the pipeline now enforces it explicitly: if fewer than 70% of the persona panel completes (`SIMAB_SIM_QUORUM`), the run fails loudly instead of synthesizing from thin evidence.
+- 12 of 20 runs degraded to abstention that night due to Gemini free-tier 503s — those score as *wrong* in the headline number, which is why we report decisive accuracy separately and publish the raw per-case table in `validation/report_*.md` rather than a single flattering percentage.
+
+Every report includes the full per-case prediction matrix, so you can audit exactly which cases each method got right.
 
 ---
 
