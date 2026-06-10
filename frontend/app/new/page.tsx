@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   AudiencePreset,
@@ -21,6 +21,17 @@ const GOAL_EXAMPLES = [
   "download the app",
 ];
 
+// Passive hints — dimensions worth covering for richer personas. Static (no
+// LLM): just a nudge so the free-text brief carries enough signal.
+const PERSONA_HINTS = [
+  "Age",
+  "Interests",
+  "Buying behaviour",
+  "Tech-savviness",
+  "Channel / source",
+  "Objections",
+];
+
 export default function NewRunPage() {
   const router = useRouter();
   const [variantA, setVariantA] = useState<File | null>(null);
@@ -36,11 +47,69 @@ export default function NewRunPage() {
   const [mode, setMode] = useState<"describe" | "manual">("describe");
   const [description, setDescription] = useState("");
   const [clarification, setClarification] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const descRef = useRef<HTMLTextAreaElement | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   // Detect "last audience" availability after mount (localStorage is client-only)
   useEffect(() => {
     setHasLastPreset(loadLastPreset() !== null);
   }, []);
+
+  // Feature-detect the Web Speech API (Chrome/Edge/Safari; absent in Firefox).
+  useEffect(() => {
+    const SR =
+      typeof window !== "undefined" &&
+      ((window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition);
+    setSpeechSupported(!!SR);
+    return () => recognitionRef.current?.stop?.();
+  }, []);
+
+  // Auto-grow the describe textarea to fit its content (capped by max-height CSS).
+  useEffect(() => {
+    const el = descRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [description]);
+
+  function toggleMic() {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SR =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+
+    // Append dictation to whatever is already typed. `base` accumulates only
+    // finalized chunks so interim updates don't duplicate text.
+    let base = description;
+    rec.onstart = () => setListening(true);
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    rec.onresult = (e: any) => {
+      let finalChunk = "";
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalChunk += t;
+        else interim += t;
+      }
+      if (finalChunk) base = (base ? base + " " : "") + finalChunk.trim();
+      const combined = interim ? (base ? base + " " : "") + interim : base;
+      setDescription(combined.replace(/\s+/g, " ").trimStart());
+    };
+    recognitionRef.current = rec;
+    rec.start();
+  }
 
   function toggleChip(key: PresetKey, option: string) {
     setPreset((cur) => {
@@ -175,28 +244,6 @@ export default function NewRunPage() {
         </p>
       </div>
 
-      {/* Mode toggle */}
-      <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1 text-sm">
-        {(["describe", "manual"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => {
-              setMode(m);
-              setClarification(null);
-            }}
-            className={[
-              "px-4 py-1.5 rounded-md transition",
-              mode === m
-                ? "bg-white shadow-sm font-medium text-neutral-900"
-                : "text-neutral-500 hover:text-neutral-800",
-            ].join(" ")}
-          >
-            {m === "describe" ? "Describe it" : "Build it manually"}
-          </button>
-        ))}
-      </div>
-
       {/* Variants */}
       <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-4">
         <h2 className="font-medium">Variants</h2>
@@ -222,29 +269,93 @@ export default function NewRunPage() {
         </p>
       </section>
 
+      {/* Mode toggle — choose input method after uploading the design */}
+      <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1 text-sm">
+        {(["describe", "manual"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => {
+              setMode(m);
+              setClarification(null);
+            }}
+            className={[
+              "px-4 py-1.5 rounded-md transition",
+              mode === m
+                ? "bg-white shadow-sm font-medium text-neutral-900"
+                : "text-neutral-500 hover:text-neutral-800",
+            ].join(" ")}
+          >
+            {m === "describe" ? "Describe it" : "Build it manually"}
+          </button>
+        ))}
+      </div>
+
       {/* Describe mode — natural-language brief, parsed by the Concierge agent */}
       {mode === "describe" && (
         <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-3">
           <h2 className="font-medium">Describe your challenge & audience</h2>
+
+          {/* Static hint chips — dimensions worth mentioning for richer personas */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-neutral-500 mr-0.5">
+              Helpful to mention:
+            </span>
+            {PERSONA_HINTS.map((h) => (
+              <span
+                key={h}
+                className="text-xs px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200"
+              >
+                {h}
+              </span>
+            ))}
+          </div>
+
           {clarification && (
             <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
               {clarification}
             </div>
           )}
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={5}
-            placeholder="e.g. We're testing our new pricing page. The goal is to get startup founders to start a free trial. They're technical, time-poor, and skeptical of long forms — most arrive from a Product Hunt launch."
-            className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+
+          {/* Expanding pill input with optional mic dictation */}
+          <div
+            className={`relative rounded-2xl border transition focus-within:ring-2 ${
               submitted && !description.trim()
-                ? "border-red-400 ring-red-200 focus:ring-red-400 bg-red-50"
-                : "border-neutral-300 focus:ring-neutral-900"
+                ? "border-red-400 focus-within:ring-red-400 bg-red-50"
+                : "border-neutral-300 focus-within:ring-neutral-900 bg-white"
             }`}
-          />
+          >
+            <textarea
+              ref={descRef}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="e.g. We're testing our new pricing page. The goal is to get startup founders to start a free trial. They're technical, time-poor, and skeptical of long forms — most arrive from a Product Hunt launch."
+              className="w-full resize-none bg-transparent rounded-2xl pl-4 pr-12 py-3 text-sm focus:outline-none max-h-72 overflow-y-auto"
+            />
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={toggleMic}
+                aria-label={listening ? "Stop dictation" : "Dictate"}
+                aria-pressed={listening}
+                title={listening ? "Stop dictation" : "Dictate"}
+                className={`absolute bottom-2.5 right-2.5 h-8 w-8 grid place-items-center rounded-full transition ${
+                  listening
+                    ? "bg-red-500 text-white animate-pulse"
+                    : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                }`}
+              >
+                <MicIcon className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
           <p className="text-xs text-neutral-500">
             Write what you're testing, the goal (what should visitors do?), and
-            who the audience is. We'll read it and start the pretest.
+            who the audience is — the more of the dimensions above you cover, the
+            sharper the personas.
+            {speechSupported && " Tap the mic to dictate instead of typing."}
           </p>
         </section>
       )}
@@ -380,6 +491,26 @@ export default function NewRunPage() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Components
 // ─────────────────────────────────────────────────────────────────────────────
+
+function MicIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  );
+}
 
 function ChipGroup({
   group,
