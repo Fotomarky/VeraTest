@@ -26,6 +26,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Google Cloud Agent Builder layer (ADK) — the hackathon-compliance front door.
+# See simab/agent.py and docs/agent-builder.md. Versions pinned to a combo
+# validated for the MCP toolset + Agent Engine import paths used by the code
+# (McpToolset/StdioConnectionParams and vertexai.preview.reasoning_engines.AdkApp).
+agent = [
+    "google-adk==1.34.3",
+    "google-cloud-aiplatform[agent-engines]==1.156.0",
+    "mcp==1.27.2",
+]
 phoenix = [
     "arize-phoenix>=4.0",
     "arize-phoenix-otel>=0.5",

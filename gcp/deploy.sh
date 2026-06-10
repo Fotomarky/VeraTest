@@ -31,8 +31,8 @@ gcloud run deploy veratest-backend \
   --max-instances 3 \
   --timeout 600 \
   --concurrency 80 \
-  --set-secrets "GEMINI_API_KEY=gemini-api-key:latest" \
-  --set-env-vars "SIMAB_DB_PATH=/tmp/simab.db,SIMAB_UPLOAD_DIR=/tmp/uploads,SIMAB_SIM_CONCURRENCY=6"
+  --set-secrets "GEMINI_API_KEY=gemini-api-key:latest,PHOENIX_API_KEY=phoenix-api-key:latest" \
+  --set-env-vars "SIMAB_DB_PATH=/tmp/simab.db,SIMAB_UPLOAD_DIR=/tmp/uploads,SIMAB_SIM_CONCURRENCY=6,GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},PHOENIX_BASE_URL=https://app.phoenix.arize.com"
 
 BACKEND_URL=$(gcloud run services describe veratest-backend \
   --region "${REGION}" --project "${PROJECT_ID}" \

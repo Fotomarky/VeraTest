@@ -144,39 +144,69 @@ def _format_result(run: dict) -> str:
     synth = run.get("synthesis") or {}
     audit = run.get("audit") or {}
 
+    scores = synth.get("cohort_resonance_overall", {}) or {}
+    score_a = scores.get("variant_a", 0) or 0
+    score_b = scores.get("variant_b", 0) or 0
+    single_screen = not run.get("variant_b_path") or score_b == 0
+
     lines = ["# UX Pretest Result", ""]
 
-    # Trust banner first (if not high)
-    if audit.get("trust_level") != "high":
-        lines.append(f"⚠️  **Trust level: {audit.get('trust_level','?').upper()}**")
-        for w in audit.get("warnings", [])[:3]:
+    # Audit banner — v0.3 AuditReport has no `trust_level`; surface the explicit
+    # bias signals it does carry (confidence collapse / score inflation / warnings).
+    warnings = audit.get("warnings", []) or []
+    flags = []
+    if audit.get("confidence_collapse"):
+        flags.append("confidence collapse")
+    if audit.get("inflation_warning"):
+        flags.append("score inflation")
+    if flags or warnings:
+        lines.append("⚠️  **Audit flags:** " + (", ".join(flags) if flags else "see notes"))
+        for w in warnings[:3]:
             lines.append(f"   - {w}")
         lines.append("")
 
-    winner = synth.get("winner", "?")
-    weighted = synth.get("weighted_vote", {})
-    weighted_pct = (
-        f"{weighted.get(winner, 0):.0%}" if winner in weighted else "?"
-    )
-    lines.extend([
-        f"**Winner:** {winner.upper()} ({weighted_pct} weighted vote)",
-        f"**Coverage:** {synth.get('coverage_score', 0)}/100",
-        "",
-        f"_{synth.get('one_line_summary', '')}_",
-        "",
-    ])
+    if single_screen:
+        lines.extend([
+            f"**Resonance:** {score_a:.1f}/10",
+            f"**Coverage:** {synth.get('coverage_score', 0)}/100",
+            "",
+        ])
+    else:
+        winner = synth.get("directional_winner", "tie")
+        total = score_a + score_b
+        share = (
+            {"variant_a": score_a / total, "variant_b": score_b / total}
+            if total else {"variant_a": 0.5, "variant_b": 0.5}
+        )
+        label = {
+            "variant_a": "Variant A",
+            "variant_b": "Variant B",
+            "tie": "Tie — no clear winner",
+        }.get(winner, "?")
+        share_str = f" ({share[winner]:.0%} share)" if winner in share else ""
+        lines.extend([
+            f"**Directional winner:** {label}{share_str}",
+            f"**Resonance:** A {score_a:.1f} vs B {score_b:.1f} (out of 10)",
+            f"**Coverage:** {synth.get('coverage_score', 0)}/100",
+            "",
+        ])
+
+    if synth.get("one_line_summary"):
+        lines.extend([f"_{synth['one_line_summary']}_", ""])
 
     if synth.get("top_friction"):
-        lines.append("## Top friction (in the losing variant)")
+        lines.append("## Top friction themes")
         for t in synth["top_friction"][:5]:
-            lines.append(f"- **{t['theme']}** ({t['count']} mentions, {t['severity']})")
+            lines.append(
+                f"- **{t.get('theme', '?')}** "
+                f"({t.get('count', 0)} mentions, {t.get('severity', '?')})"
+            )
         lines.append("")
 
-    if synth.get("segment_splits"):
-        lines.append("## Segment splits")
-        for seg, splits in list(synth["segment_splits"].items())[:5]:
-            pct = ", ".join(f"{k}: {v:.0%}" for k, v in splits.items())
-            lines.append(f"- {seg} — {pct}")
+    if synth.get("trust_signal_gaps"):
+        lines.append("## Trust gaps")
+        for g in synth["trust_signal_gaps"][:5]:
+            lines.append(f"- {g}")
         lines.append("")
 
     if synth.get("recommendation"):
@@ -236,10 +266,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     return [TextContent(type="text", text="No runs yet.")]
                 lines = ["# Recent runs", ""]
                 for r in runs:
-                    winner = (r.get("synthesis") or {}).get("winner", "—")
+                    winner = (r.get("synthesis") or {}).get("directional_winner", "—")
+                    wlabel = {"variant_a": "A", "variant_b": "B", "tie": "tie"}.get(winner, "—")
                     lines.append(
                         f"- `{r['run_id']}` · {r['status']} · "
-                        f"goal: \"{r['goal'][:50]}\" · winner: {winner}"
+                        f"goal: \"{r['goal'][:50]}\" · winner: {wlabel}"
                     )
                 return [TextContent(type="text", text="\n".join(lines))]
 

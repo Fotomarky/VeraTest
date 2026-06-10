@@ -3,7 +3,7 @@
 Replaces the vote-based winner with a gap-and-significance verdict:
 - compute mean resonance vector per cohort
 - collapse to overall via RESONANCE_WEIGHTS
-- declare a directional winner only if the gap is large enough vs. pooled noise
+- declare a directional winner only if the gap exceeds the standard error of that difference
 - friction clustering partitions by cohort (losing/winning)
 - per-persona resonance matrix kept for the diagnostic heatmap
 """
@@ -143,26 +143,33 @@ def _pop_variance(values: list[float]) -> float:
     return sum((v - mean) ** 2 for v in values) / len(values)
 
 
-def _pooled_std(by_cohort: dict[str, list[SimResult]]) -> float:
-    """sqrt of mean of within-cohort variances on resonance_overall."""
-    vars_ = []
+def _se_difference(by_cohort: dict[str, list[SimResult]]) -> float:
+    """Standard error of the difference of two cohort means.
+
+    SE_diff = sqrt(var_a/n_a + var_b/n_b). This is the noise floor the
+    observed gap must clear to be a real directional signal — using the
+    plain pooled std (which ignores sample size) made the engine abstain
+    far too often.
+    """
+    terms = []
     for items in by_cohort.values():
-        if items:
-            vars_.append(_pop_variance([r.resonance_overall for r in items]))
-    if not vars_:
+        n = len(items)
+        if n > 0:
+            terms.append(_pop_variance([r.resonance_overall for r in items]) / n)
+    if not terms:
         return 0.0
-    return math.sqrt(sum(vars_) / len(vars_))
+    return math.sqrt(sum(terms))
 
 
-def _verdict(gap: float, pooled_std: float) -> tuple[str, str]:
+def _verdict(gap: float, se_diff: float) -> tuple[str, str]:
     """Returns (directional_winner, gap_significance)."""
     abs_gap = abs(gap)
-    if abs_gap < TIE_GAP_FLOOR or abs_gap < pooled_std:
+    if abs_gap < TIE_GAP_FLOOR or abs_gap < se_diff:
         return "tie", "tie"
     winner = "variant_b" if gap > 0 else "variant_a"
-    if abs_gap > 1.5 * pooled_std and abs_gap > STRONG_GAP_FLOOR:
+    if abs_gap > 2.0 * se_diff and abs_gap > STRONG_GAP_FLOOR:
         return winner, "strong"
-    if abs_gap > pooled_std:
+    if abs_gap > 1.5 * se_diff:
         return winner, "moderate"
     return winner, "weak"
 
@@ -346,7 +353,7 @@ async def run(
         cohort_overall = _cohort_overall(cohort_res)
         gap = 0.0
         directional_winner, gap_significance = "tie", "tie"
-        pooled = 0.0
+        se_diff = 0.0
 
         # Two independent Flash calls — run in parallel.
         top_friction, worked_themes = await asyncio.gather(
@@ -379,8 +386,8 @@ async def run(
         cohort_res = _cohort_resonance(by_cohort)
         cohort_overall = _cohort_overall(cohort_res)
         gap = round(cohort_overall.get("variant_b", 0.0) - cohort_overall.get("variant_a", 0.0), 3)
-        pooled = _pooled_std(by_cohort)
-        directional_winner, gap_significance = _verdict(gap, pooled)
+        se_diff = _se_difference(by_cohort)
+        directional_winner, gap_significance = _verdict(gap, se_diff)
 
         if directional_winner == "tie":
             losing_items = results
@@ -443,7 +450,7 @@ async def run(
     await state.write_synthesis(run_id, synthesis)
     log.info(
         f"[{run_id}] synthesizer: winner={directional_winner} sig={gap_significance} "
-        f"gap={gap:+.2f} pooled_std={pooled:.2f} a={cohort_overall.get('variant_a', 0):.2f} "
+        f"gap={gap:+.2f} se_diff={se_diff:.2f} a={cohort_overall.get('variant_a', 0):.2f} "
         f"b={cohort_overall.get('variant_b', 0):.2f} coverage={coverage}"
     )
     return synthesis

@@ -19,6 +19,7 @@ from ..config import CONFIG
 log = logging.getLogger(__name__)
 
 _initialized = False
+_tracer_provider = None
 
 
 def init_phoenix() -> bool:
@@ -27,7 +28,7 @@ def init_phoenix() -> bool:
     Returns True if successfully initialized, False if skipped.
     Safe to call multiple times.
     """
-    global _initialized
+    global _initialized, _tracer_provider
     if _initialized:
         return True
 
@@ -56,6 +57,7 @@ def init_phoenix() -> bool:
             register_kwargs["api_key"] = CONFIG.phoenix_api_key
         tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        _tracer_provider = tracer_provider
         _initialized = True
         ui_hint = CONFIG.phoenix_endpoint or "http://localhost:6006"
         log.info(
@@ -72,3 +74,19 @@ def init_phoenix() -> bool:
     except Exception as e:
         log.warning(f"Phoenix init failed (non-fatal): {e}")
         return False
+
+
+def flush_phoenix() -> None:
+    """Force-flush any batched spans to the collector.
+
+    The batch span processor exports on a timer, so a short-lived process
+    (e.g. the validation harness) can exit before its spans are sent.
+    Call this before exit to guarantee delivery. No-op if Phoenix is off.
+    """
+    if _tracer_provider is None:
+        return
+    try:
+        _tracer_provider.force_flush()
+        log.info("Phoenix spans flushed.")
+    except Exception as e:  # pragma: no cover - best-effort on shutdown
+        log.warning(f"Phoenix flush failed (non-fatal): {e}")

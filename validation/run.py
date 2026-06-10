@@ -174,6 +174,15 @@ async def run_baseline(
 
 
 async def main(dataset_path: str, baselines_mode: str) -> None:
+    # Trace every Gemini call (one-shot baseline + full SimAB pipeline) into
+    # Phoenix. No-op unless PHOENIX_COLLECTOR_ENDPOINT is set — source the
+    # Cloud Run config first: `source validation/phoenix_env.sh`.
+    from simab.config import CONFIG
+    from simab.integrations.phoenix import init_phoenix
+    if init_phoenix():
+        print(f"Phoenix tracing ON → project '{CONFIG.phoenix_project}' "
+              f"@ {CONFIG.phoenix_endpoint}\n")
+
     cases = load_dataset(dataset_path)
     print(f"\nLoaded {len(cases)} test cases from {dataset_path}\n")
 
@@ -245,6 +254,10 @@ async def main(dataset_path: str, baselines_mode: str) -> None:
                 "variant B winning (publication bias — positive results get written up more often).\n")
 
     print(f"\nReport written to: {report_path}\n")
+
+    # Short-lived process: force-flush batched spans before we exit.
+    from simab.integrations.phoenix import flush_phoenix
+    flush_phoenix()
 
 
 if __name__ == "__main__":

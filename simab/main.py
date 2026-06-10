@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from typing import Optional
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from sse_starlette.sse import EventSourceResponse
@@ -46,6 +46,8 @@ async def lifespan(app: FastAPI):
     Path(CONFIG.db_path).parent.mkdir(parents=True, exist_ok=True)
     await state.get_db()  # initialize schema
     init_phoenix()  # OpenInference tracing — no-op when PHOENIX_* env not set
+    from . import agent_runtime
+    agent_runtime.warmup()  # build the ADK Runner once; no-op without [agent]
     yield
     await state.close_db()
 
@@ -133,6 +135,71 @@ async def create_run(
         stream_url=f"/api/runs/{run_id}/stream",
         dashboard_url=f"{CONFIG.frontend_url}/runs/{run_id}",
     )
+
+
+# ---------------------------------------------------------------------------
+# Agent ("describe it" mode) — natural-language front door to the pipeline.
+# Two steps: upload the screenshot(s), then launch via the ADK Concierge agent.
+# ---------------------------------------------------------------------------
+
+@app.post("/api/agent/upload")
+async def agent_upload(
+    variant_a: UploadFile,
+    variant_b: Optional[UploadFile] = None,
+) -> dict:
+    """Stash uploaded screenshot(s) and return their server-side paths.
+
+    The agent's start_pretest tool takes filesystem paths, so the browser
+    uploads here first, then passes the returned paths to /api/agent/launch.
+    """
+    if not variant_a:
+        raise HTTPException(status_code=400, detail="variant_a is required")
+    upload_root = Path(CONFIG.upload_dir)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    suffix = uuid.uuid4().hex[:8]
+    a_path = upload_root / f"{suffix}_a_{variant_a.filename}"
+    a_path.write_bytes(await variant_a.read())
+    b_path_str: Optional[str] = None
+    if variant_b:
+        b_path = upload_root / f"{suffix}_b_{variant_b.filename}"
+        b_path.write_bytes(await variant_b.read())
+        b_path_str = str(b_path)
+    return {"variant_a_path": str(a_path), "variant_b_path": b_path_str}
+
+
+@app.post("/api/agent/launch")
+async def agent_launch(
+    description: str = Body(...),
+    variant_a_path: str = Body(...),
+    variant_b_path: Optional[str] = Body(None),
+) -> dict:
+    """Run one Concierge turn that parses the description and starts a pretest.
+
+    Returns {"run_id": ...} on success (page redirects to /runs/{id}), or
+    {"needs_clarification": True, "question": ...} if the agent needs more info.
+    """
+    description = (description or "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+    if not variant_a_path:
+        raise HTTPException(status_code=400, detail="variant_a_path is required")
+
+    from . import agent_runtime
+    try:
+        result = await agent_runtime.launch_from_description(
+            description, variant_a_path, variant_b_path or None
+        )
+    except Exception as e:
+        # Surface the real cause to the UI instead of an opaque 500 — the agent
+        # turn can fail on Vertex auth, model errors, or an MCP tool hiccup.
+        log.exception("agent launch failed")
+        raise HTTPException(
+            status_code=503, detail=f"{type(e).__name__}: {e}"[:400]
+        )
+
+    if result.get("run_id"):
+        result["dashboard_url"] = f"{CONFIG.frontend_url}/runs/{result['run_id']}"
+    return result
 
 
 @app.get("/api/runs/{run_id}")

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections import deque
@@ -40,11 +41,26 @@ class RateLimit:
     rpd: int  # requests per day
 
 
-# Conservative limits — leave headroom for retries
+# Conservative limits — leave headroom for retries.
+# SIMAB_RATE_MULTIPLIER scales every rpm/rpd (default 1.0). Bump it for offline
+# benchmarks (e.g. the validation harness) where you'd rather push toward the
+# real Google quota than the conservative cap. The server-side free-tier quota
+# is still the hard ceiling — this only relaxes the client-side throttle.
+_RATE_MULT = max(0.1, float(os.environ.get("SIMAB_RATE_MULTIPLIER", "1.0")))
+
+# Per-call request timeout (seconds). A stalled Gemini response otherwise blocks
+# the calling task forever; with a timeout it raises and tenacity retries.
+_REQUEST_TIMEOUT_S = float(os.environ.get("SIMAB_REQUEST_TIMEOUT_S", "90"))
+
+
+def _scaled(rpm: int, rpd: int) -> RateLimit:
+    return RateLimit(rpm=max(1, round(rpm * _RATE_MULT)), rpd=max(1, round(rpd * _RATE_MULT)))
+
+
 _LIMITS = {
-    MODEL_FLASH_LITE: RateLimit(rpm=25, rpd=1400),  # cap below quota
-    MODEL_FLASH: RateLimit(rpm=12, rpd=480),
-    MODEL_PRO: RateLimit(rpm=4, rpd=45),
+    MODEL_FLASH_LITE: _scaled(25, 1400),  # cap below quota
+    MODEL_FLASH: _scaled(12, 480),
+    MODEL_PRO: _scaled(4, 45),
 }
 
 
@@ -96,7 +112,11 @@ def get_client() -> genai.Client:
                 "GEMINI_API_KEY is not set. Get a free key at "
                 "https://aistudio.google.com/app/apikey"
             )
-        _client = genai.Client(api_key=CONFIG.gemini_api_key)
+        # Pin to the AI Studio Developer API (api-key auth). Without vertexai=False,
+        # a process-wide GOOGLE_GENAI_USE_VERTEXAI=TRUE (set for the ADK agent
+        # layer) would route this api-key client to Vertex, which rejects API
+        # keys with a 401. The pipeline's free-tier key is for AI Studio only.
+        _client = genai.Client(api_key=CONFIG.gemini_api_key, vertexai=False)
     return _client
 
 
@@ -144,12 +164,17 @@ async def generate(
         response_mime_type="application/json" if response_schema else "text/plain",
     )
 
-    # Run the sync SDK call in a thread to keep our async loop free
-    response = await asyncio.to_thread(
-        client.models.generate_content,
-        model=model,
-        contents=parts,
-        config=config,
+    # Run the sync SDK call in a thread to keep our async loop free. Wrap in a
+    # timeout so a stalled response raises (and tenacity retries) instead of
+    # blocking the task indefinitely — the SDK call itself sets no socket timeout.
+    response = await asyncio.wait_for(
+        asyncio.to_thread(
+            client.models.generate_content,
+            model=model,
+            contents=parts,
+            config=config,
+        ),
+        timeout=_REQUEST_TIMEOUT_S,
     )
 
     text = response.text or ""
@@ -163,15 +188,18 @@ async def generate(
     except json.JSONDecodeError as e:
         log.warning(f"Failed to parse JSON from {model}: {e}\nText: {text[:500]}")
         # Fallback: ask Gemini to fix its own JSON (one more call, worth it)
-        fix_response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=MODEL_FLASH_LITE,
-            contents=[
-                f"Fix this to valid JSON. Return ONLY the JSON object, no prose:\n{text[:2000]}"
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0,
-                response_mime_type="application/json",
+        fix_response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=MODEL_FLASH_LITE,
+                contents=[
+                    f"Fix this to valid JSON. Return ONLY the JSON object, no prose:\n{text[:2000]}"
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0,
+                    response_mime_type="application/json",
+                ),
             ),
+            timeout=_REQUEST_TIMEOUT_S,
         )
         return json.loads(_strip_json_fences(fix_response.text or "{}"))

@@ -17,9 +17,17 @@ os.environ["SIMAB_MAX_PENDING"] = "3"
 os.environ["SIMAB_MAX_UPLOAD_MB"] = "2"
 os.environ["SIMAB_ACCESS_CODE"] = ""
 
+import importlib
+
 import simab.ratelimit as rl
 
-rl._cfg = rl.RateLimitConfig()  # re-read env vars
+# RateLimitConfig bakes os.getenv() into its dataclass field defaults, which are
+# frozen at class-definition (i.e. first import) time. If another test module
+# imported simab.ratelimit before this file ran (e.g. transitively via
+# simab.pipeline), those defaults captured the wrong values and merely
+# re-instantiating RateLimitConfig() would NOT pick up the env vars set above.
+# Reloading re-executes the module so the class defaults capture them now.
+importlib.reload(rl)
 
 
 @pytest.fixture(autouse=True)
