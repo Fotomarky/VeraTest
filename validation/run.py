@@ -7,6 +7,14 @@ Compares SimAB's full pipeline against baselines:
 Usage:
   python validation/run.py --dataset validation/dataset.csv --baselines cheap
   python validation/run.py --dataset validation/dataset.csv --baselines all
+
+Predictions are checkpointed to validation/checkpoint_<dataset>.json after
+every case, so an interrupted (or 503-poisoned) run can be resumed: cached
+A/B predictions are reused, abstentions ("?") are re-attempted. Use --fresh
+to discard the checkpoint and recompute everything.
+
+Scoring distinguishes overall accuracy (abstention counts as wrong) from
+decisive accuracy (correct / cases where the method committed to A or B).
 """
 from __future__ import annotations
 import argparse
@@ -142,11 +150,34 @@ class Result:
     predictions: list[str] = field(default_factory=list)
     correct: int = 0
     total: int = 0
+    abstained: int = 0
     latency_s: float = 0.0
 
     @property
     def accuracy(self) -> float:
         return self.correct / self.total if self.total else 0.0
+
+    @property
+    def decisive_total(self) -> int:
+        return self.total - self.abstained
+
+    @property
+    def decisive_accuracy(self) -> float:
+        """Accuracy over cases where the method committed to A or B."""
+        return self.correct / self.decisive_total if self.decisive_total else 0.0
+
+
+def _case_key(method: str, case: TestCase) -> str:
+    return f"{method}::{Path(case.variant_a_path).stem}"
+
+
+def _load_checkpoint(path: Path) -> dict[str, str]:
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError:
+            print(f"WARNING: corrupt checkpoint {path} — starting fresh")
+    return {}
 
 
 async def run_baseline(
@@ -154,26 +185,43 @@ async def run_baseline(
     fn,
     cases: list[TestCase],
     is_async: bool = False,
+    checkpoint: dict[str, str] | None = None,
+    checkpoint_path: Path | None = None,
 ) -> Result:
     result = Result(method=name)
     t0 = time.monotonic()
     for case in cases:
-        try:
-            pred = await fn(case) if is_async else fn(case)
-        except Exception as e:
-            print(f"  [{name}] ERROR on {Path(case.variant_a_path).stem}: {e}")
-            pred = "?"
+        key = _case_key(name, case)
+        cached = (checkpoint or {}).get(key)
+        # Reuse committed predictions; re-attempt abstentions (the resume
+        # point for 503-poisoned cases).
+        if cached in ("A", "B"):
+            pred = cached
+            from_cache = True
+        else:
+            from_cache = False
+            try:
+                pred = await fn(case) if is_async else fn(case)
+            except Exception as e:
+                print(f"  [{name}] ERROR on {Path(case.variant_a_path).stem}: {e}")
+                pred = "?"
+            if checkpoint is not None and checkpoint_path is not None:
+                checkpoint[key] = pred
+                checkpoint_path.write_text(json.dumps(checkpoint, indent=1))
         result.predictions.append(pred)
         result.total += 1
+        if pred == "?":
+            result.abstained += 1
         if pred == case.true_winner:
             result.correct += 1
         status = "✓" if pred == case.true_winner else "✗"
-        print(f"  [{name}] {status} predicted={pred} actual={case.true_winner}  ({Path(case.variant_a_path).stem})")
+        cache_note = "  (cached)" if from_cache else ""
+        print(f"  [{name}] {status} predicted={pred} actual={case.true_winner}  ({Path(case.variant_a_path).stem}){cache_note}")
     result.latency_s = time.monotonic() - t0
     return result
 
 
-async def main(dataset_path: str, baselines_mode: str) -> None:
+async def main(dataset_path: str, baselines_mode: str, fresh: bool = False) -> None:
     # Trace every Gemini call (one-shot baseline + full SimAB pipeline) into
     # Phoenix. No-op unless PHOENIX_COLLECTOR_ENDPOINT is set — source the
     # Cloud Run config first: `source validation/phoenix_env.sh`.
@@ -195,37 +243,51 @@ async def main(dataset_path: str, baselines_mode: str) -> None:
             print(f"  B: {c.variant_b_path} — exists: {Path(c.variant_b_path).exists()}")
         sys.exit(1)
 
+    # Checkpoint: per-(method, case) predictions, written after every case so a
+    # crashed or 503-poisoned run resumes instead of redoing ~50 min of work.
+    ckpt_path = Path(__file__).parent / f"checkpoint_{Path(dataset_path).stem}.json"
+    if fresh and ckpt_path.exists():
+        ckpt_path.unlink()
+        print(f"Discarded checkpoint {ckpt_path} (--fresh)\n")
+    checkpoint = _load_checkpoint(ckpt_path)
+    if checkpoint:
+        cached_n = sum(1 for v in checkpoint.values() if v in ("A", "B"))
+        print(f"Resuming from {ckpt_path}: {cached_n} committed predictions cached "
+              f"(abstentions will be re-attempted)\n")
+    ck = {"checkpoint": checkpoint, "checkpoint_path": ckpt_path}
+
     results: list[Result] = []
 
     # Cheap baselines (no API calls)
     print("── Random baseline ──────────────────")
-    results.append(await run_baseline("random", baseline_random, cases))
+    results.append(await run_baseline("random", baseline_random, cases, **ck))
 
     print("\n── Always-A baseline ────────────────")
-    results.append(await run_baseline("always_a", baseline_always_a, cases))
+    results.append(await run_baseline("always_a", baseline_always_a, cases, **ck))
 
     print("\n── Always-B baseline ────────────────")
-    results.append(await run_baseline("always_b", baseline_always_b, cases))
+    results.append(await run_baseline("always_b", baseline_always_b, cases, **ck))
 
     if baselines_mode == "all":
         print("\n── Heuristic baseline ───────────────")
-        results.append(await run_baseline("heuristic", baseline_heuristic, cases))
+        results.append(await run_baseline("heuristic", baseline_heuristic, cases, **ck))
 
         print("\n── One-shot Gemini ──────────────────")
-        results.append(await run_baseline("oneshot_gemini", baseline_oneshot_gemini, cases, is_async=True))
+        results.append(await run_baseline("oneshot_gemini", baseline_oneshot_gemini, cases, is_async=True, **ck))
 
         print("\n── SimAB full pipeline ──────────────")
-        results.append(await run_baseline("simab", baseline_simab, cases, is_async=True))
+        results.append(await run_baseline("simab", baseline_simab, cases, is_async=True, **ck))
 
     # Print summary table
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 78)
     print("ACCURACY SUMMARY")
-    print("=" * 60)
-    print(f"{'Method':<20} {'Accuracy':>10} {'Correct':>8} {'Total':>7} {'Time':>8}")
-    print("-" * 60)
+    print("=" * 78)
+    print(f"{'Method':<18} {'Accuracy':>9} {'Correct':>8} {'Abstain':>8} {'Decisive':>9} {'Time':>8}")
+    print("-" * 78)
     for r in results:
-        print(f"{r.method:<20} {r.accuracy:>9.1%} {r.correct:>8} {r.total:>7} {r.latency_s:>7.1f}s")
-    print("=" * 60)
+        decisive = f"{r.decisive_accuracy:.1%}" if r.decisive_total else "—"
+        print(f"{r.method:<18} {r.accuracy:>8.1%} {r.correct:>8} {r.abstained:>8} {decisive:>9} {r.latency_s:>7.1f}s")
+    print("=" * 78)
 
     # Write markdown report
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -236,10 +298,14 @@ async def main(dataset_path: str, baselines_mode: str) -> None:
         f.write(f"**Cases:** {len(cases)}  \n")
         f.write(f"**Run at:** {datetime.now().isoformat()}  \n\n")
         f.write("## Accuracy\n\n")
-        f.write("| Method | Accuracy | Correct | Total |\n")
-        f.write("|---|---|---|---|\n")
+        f.write("| Method | Accuracy | Correct | Total | Abstained | Decisive accuracy |\n")
+        f.write("|---|---|---|---|---|---|\n")
         for r in results:
-            f.write(f"| {r.method} | {r.accuracy:.1%} | {r.correct} | {r.total} |\n")
+            decisive = f"{r.decisive_accuracy:.1%} ({r.correct}/{r.decisive_total})" if r.decisive_total else "—"
+            f.write(f"| {r.method} | {r.accuracy:.1%} | {r.correct} | {r.total} | {r.abstained} | {decisive} |\n")
+        f.write("\n*Accuracy scores abstentions (\"?\") as wrong. Decisive accuracy = correct / cases "
+                "where the method committed to A or B — read both together: a method that abstains "
+                "under degraded conditions instead of guessing is behaving correctly.*\n")
         f.write("\n## Per-case results\n\n")
         f.write(f"| Test | True winner | " + " | ".join(r.method for r in results) + " |\n")
         f.write("|---|---|" + "|".join("---" for _ in results) + "|\n")
@@ -269,5 +335,10 @@ if __name__ == "__main__":
         default="cheap",
         help="cheap = random/always-A/always-B only; all = includes oneshot Gemini + SimAB",
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard the per-dataset checkpoint and recompute every prediction.",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.dataset, args.baselines))
+    asyncio.run(main(args.dataset, args.baselines, fresh=args.fresh))

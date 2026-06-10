@@ -17,6 +17,7 @@ class Config:
     frontend_url: str
     sim_concurrency: int
     num_agents: int
+    sim_quorum: float
     ga4_client_id: str | None
     ga4_client_secret: str | None
     ga4_redirect_uri: str
@@ -39,6 +40,10 @@ class Config:
             frontend_url=os.environ.get("FRONTEND_URL", "http://localhost:3000"),
             sim_concurrency=int(os.environ.get("SIMAB_SIM_CONCURRENCY", "6")),
             num_agents=int(os.environ.get("SIMAB_NUM_AGENTS", "20")),
+            # Minimum fraction of sims that must complete before synthesis.
+            # Below quorum the run fails loudly rather than synthesizing a
+            # misleading verdict from too little evidence.
+            sim_quorum=float(os.environ.get("SIMAB_SIM_QUORUM", "0.7")),
             ga4_client_id=os.environ.get("GA4_CLIENT_ID") or None,
             ga4_client_secret=os.environ.get("GA4_CLIENT_SECRET") or None,
             ga4_redirect_uri=os.environ.get(

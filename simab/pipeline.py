@@ -20,7 +20,14 @@ log = logging.getLogger(__name__)
 
 
 async def _run_simulators(run_id: str) -> None:
-    """Fan out 20 sim agents with bounded concurrency."""
+    """Fan out 20 sim agents with bounded concurrency, then enforce a quorum.
+
+    Failed sims get one retry pass (writes are idempotent upserts, so re-running
+    an index is harmless). If fewer than SIMAB_SIM_QUORUM of the panel completed
+    after that, raise — synthesizing a verdict from a thin panel produces a
+    misleading "tie" that looks like a finding (this is what turned Gemini 503
+    bursts into silent abstentions in validation).
+    """
     run = await state.get_run(run_id)
     if run is None:
         raise ValueError(f"Run {run_id} not found")
@@ -34,14 +41,34 @@ async def _run_simulators(run_id: str) -> None:
                 await simulator.run_one(run_id, agent_idx, scenario)
             except Exception as e:
                 log.error(f"[{run_id}] agent {agent_idx} failed: {e}")
-                # Continue — partial results are still useful
+                # Continue — the retry pass below picks up the stragglers
+
+    async def _missing_indices() -> list[int]:
+        fresh = await state.get_run(run_id)
+        done = {r.agent_idx for r in (fresh.simulation_results or [])}
+        return [i for i in range(len(run.scenarios)) if i not in done]
 
     await asyncio.gather(*[
         _bounded(i, sc) for i, sc in enumerate(run.scenarios)
     ])
 
+    missing = await _missing_indices()
+    if missing:
+        log.warning(f"[{run_id}] retrying {len(missing)} failed sims: {missing}")
+        await asyncio.gather(*[
+            _bounded(i, run.scenarios[i]) for i in missing
+        ])
+
     completed = await state.count_sim_results(run_id)
-    log.info(f"[{run_id}] simulators: {completed}/{len(run.scenarios)} complete")
+    total = len(run.scenarios)
+    log.info(f"[{run_id}] simulators: {completed}/{total} complete")
+    if total and completed / total < CONFIG.sim_quorum:
+        raise RuntimeError(
+            f"Only {completed}/{total} simulations completed "
+            f"(quorum {CONFIG.sim_quorum:.0%}) — refusing to synthesize a "
+            f"verdict from a thin panel. Likely Gemini capacity (503s); "
+            f"retry the run."
+        )
 
 
 async def run_pipeline(run_id: str) -> None:
