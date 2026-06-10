@@ -28,6 +28,7 @@ simab/                  Backend Python package (FastAPI)
   llm.py                Gemini wrapper — rate limiting, retries, JSON parsing
   config.py             Env-var config (frozen dataclass)
   exports.py            Markdown, PM summary, standalone HTML share page
+  agent.py              Agent Builder (ADK) front door — LlmAgent wrapping the pipeline as tools + Arize Phoenix MCP toolset
   agents/
     normalizer.py       Phase 1 · Study Designer: parse goal + audience + images → Brief
     scenarios.py        Phase 2 · Panel Recruiter: Brief → 3-7 ScenarioCards + allocations
@@ -145,7 +146,10 @@ If a run gets stuck in `simulating`, lower `SIMAB_SIM_CONCURRENCY` (default 6).
 | `SIMAB_SIM_CONCURRENCY` | `6` | Max parallel sim agents |
 | `SIMAB_NUM_AGENTS` | `20` | Total sim agents per run |
 | `FRONTEND_URL` | `http://localhost:3000` | Used in share URLs |
-| `PHOENIX_COLLECTOR_ENDPOINT` | — | Optional: Arize Phoenix OTLP gRPC endpoint |
+| `PHOENIX_COLLECTOR_ENDPOINT` | — | Optional: Arize Phoenix OTLP endpoint (tracing) |
+| `PHOENIX_BASE_URL` | — | Agent layer: Phoenix instance the `@arizeai/phoenix-mcp` server queries (e.g. `https://app.phoenix.arize.com`) |
+| `GOOGLE_GENAI_USE_VERTEXAI` | — | Agent layer: `TRUE` routes Gemini through Vertex AI (Agent Builder) |
+| `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` | — | Agent layer: Vertex AI project + region (e.g. `veratest-497813` / `us-central1`) |
 | `SIMAB_SLACK_WEBHOOK_URL` | — | Optional: post completions to Slack |
 | `GA4_CLIENT_ID` / `GA4_CLIENT_SECRET` | — | Optional: import audience from GA4 |
 
@@ -276,7 +280,7 @@ Health
 
 ## Key design decisions to preserve
 
-- **No agent frameworks** (no LangGraph, no CrewAI). All coordination is through SQLite state. This is intentional — it makes the system debuggable without framework abstractions.
+- **Framework-free pipeline core, with an Agent Builder front door.** The 6-phase pipeline itself uses no orchestration framework (no LangGraph, no CrewAI) — all coordination is through SQLite state, which keeps it debuggable without framework abstractions. **Do not add a framework inside the pipeline.** Separately, `simab/agent.py` adds a thin **Google Cloud Agent Builder (ADK)** layer *in front of* the pipeline for the hackathon's Arize-track requirements: a single `LlmAgent` ("VeraTest Concierge") that exposes `start_pretest`/`get_pretest_result` as tools and mounts the `@arizeai/phoenix-mcp` server as a live MCP toolset. It is import-guarded (`root_agent = None` when `google-adk` is absent) so it never affects the FastAPI app or tests. Install with `pip install -e ".[agent]"`; see `docs/agent-builder.md`. Required env for the agent: `GOOGLE_GENAI_USE_VERTEXAI=TRUE`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `PHOENIX_BASE_URL`, `PHOENIX_API_KEY`.
 - **Idempotent writes.** `simulator.py` writes each `SimResult` with a mutex check so duplicate calls are harmless. Critical for retry safety.
 - **SQLite WAL mode.** 20 concurrent writers are safe because WAL handles concurrent reads; the mutex in state.py serialises the writes.
 - **Multimodal from the start.** Every Gemini call that involves comparing variants passes both images. The `llm.generate()` wrapper accepts `images: list[bytes]`.
@@ -288,12 +292,15 @@ Health
 
 Competition: **Google Cloud Rapid Agent Hackathon — Arize Track**
 
-Track requirements:
+Track requirements (all three required techs must be **called at runtime**, not just named):
+- Gemini at runtime (✅ `simab/llm.py`; route via Vertex with `GOOGLE_GENAI_USE_VERTEXAI=TRUE` for the judged build)
+- Google Cloud Agent Builder (✅ ADK `LlmAgent` in `simab/agent.py` — see `docs/agent-builder.md`; deploy via `scripts/deploy_agent_engine.py`)
+- Arize partner **MCP server** at runtime (✅ `@arizeai/phoenix-mcp` mounted as a live ADK MCP toolset — distinct from OTLP tracing)
 - Multi-agent system (✅ 6 phases + 20 parallel sims)
-- Arize Phoenix observability integration (✅ OTLP via `PHOENIX_COLLECTOR_ENDPOINT`)
-- Open source with detectable license (✅ MIT)
-- Live demo URL required
-- ~3 minute demo video
+- Open source with detectable license (✅ MIT — repo must be **public** for judges)
+- Live demo URL required · ~3 minute demo video
+
+See `docs/HACKATHON_COMPLIANCE.md` for the full rule-by-rule audit and remaining gaps.
 
 **For the Arize track specifically:** start Phoenix (`docker run -p 6006:6006 -p 4317:4317 arizephoenix/phoenix:latest`) before the demo. Run a pretest live. Show the agent spans in Phoenix at http://localhost:6006 — one span per Gemini call, ~24 per run. This is the single highest-impact thing for the demo video.
 

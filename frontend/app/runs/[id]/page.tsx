@@ -7,6 +7,7 @@ import BlockersMatrix from "../../components/BlockersMatrix";
 import ResultsHero from "../../components/ResultsHero";
 import UserStoryScaffold from "../../components/UserStoryScaffold";
 import VisualEvidence from "../../components/VisualEvidence";
+import EconomicsStrip from "../../components/EconomicsStrip";
 
 type ScenarioCard = {
   id: string;
@@ -82,6 +83,8 @@ type Run = {
     agents_incoherent?: number;
     drifted_agent_indices?: number[];
   } | null;
+  created_at?: string;
+  updated_at?: string;
   error?: string;
 };
 
@@ -306,6 +309,16 @@ export default function RunPage({ params }: { params: { id: string } }) {
           resultsBySegment={resultsBySegment}
           winner={winner}
           isSingleScreen={isSingleScreen}
+        />
+      )}
+
+      {synth && run.status === "complete" && (
+        <EconomicsStrip
+          elapsedSec={
+            run.created_at && run.updated_at
+              ? (Date.parse(run.updated_at) - Date.parse(run.created_at)) / 1000
+              : null
+          }
         />
       )}
 

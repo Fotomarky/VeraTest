@@ -265,7 +265,8 @@ simab/
 ├── pipeline.py          Sequential orchestration with async parallel sim phase
 ├── state.py             SQLite WAL — distributed mutex for idempotent writes
 ├── main.py              FastAPI — REST + SSE + share page + A2A endpoint
-└── llm.py               Gemini client — rate limiting, retries, JSON self-healing
+├── llm.py               Gemini client — rate limiting, retries, JSON self-healing
+└── agent.py             Agent Builder (ADK) front door — wraps the pipeline as tools + Arize Phoenix MCP toolset
 
 frontend/
 └── app/
@@ -282,14 +283,47 @@ frontend/
         └── VisualEvidence.tsx     Collapsible variant image reference
 ```
 
-**Why no agent framework?** VeraTest deliberately uses none. The pipeline
-coordinates through a single shared SQLite document — every agent reads
-from and writes to one structured record — so each run is fully
-inspectable, every decision is debuggable, and there's no framework
-abstraction between you and the agent behavior. This is exactly the
-transparency Phoenix tracing is designed for: every Gemini call is a
-direct OpenInference span, with no framework intermediation to obscure
-what the agent saw and decided.
+**A framework-free core behind an Agent Builder front door.** The 6-phase
+pipeline coordinates through a single shared SQLite document — every agent
+reads from and writes to one structured record (stigmergy) — so each run is
+fully inspectable and every Gemini call is a direct OpenInference span, with
+no framework intermediation to obscure what the agent saw and decided. That
+transparent core is left **untouched**. In front of it sits a thin **Google
+Cloud Agent Builder** layer (`simab/agent.py`): a single ADK `LlmAgent`
+("VeraTest Concierge") that a PM chats with. It exposes the pipeline as two
+tools (`start_pretest`, `get_pretest_result`) and mounts the **Arize Phoenix
+MCP server** (`@arizeai/phoenix-mcp`) as a live MCP toolset, so it can query
+traces, datasets, and prior runs at runtime. See
+[`docs/agent-builder.md`](docs/agent-builder.md).
+
+---
+
+## Google Cloud Agent Builder layer (ADK)
+
+```
+User ──chat──▶ ADK LlmAgent  (Gemini via Vertex AI = Google Cloud Agent Builder)
+                 ├─ tool: start_pretest        → existing pipeline.run_pipeline()
+                 ├─ tool: get_pretest_result   → existing state.get_run()
+                 └─ MCPToolset → @arizeai/phoenix-mcp   (Arize partner MCP server, live)
+```
+
+One component satisfies all three Arize-track requirements **at runtime**:
+Gemini (the agent's reasoning model, served via Vertex AI when
+`GOOGLE_GENAI_USE_VERTEXAI=TRUE`), Google Cloud Agent Builder (ADK is its
+official SDK), and the Arize partner MCP server (mounted as a live toolset).
+
+```bash
+pip install -e ".[agent]"
+export GOOGLE_GENAI_USE_VERTEXAI=TRUE
+export GOOGLE_CLOUD_PROJECT=veratest-497813 GOOGLE_CLOUD_LOCATION=us-central1
+gcloud auth application-default login
+export PHOENIX_BASE_URL=https://app.phoenix.arize.com PHOENIX_API_KEY=...
+adk web simab        # dev chat UI at http://localhost:8000
+```
+
+Deploy to **Vertex AI Agent Engine** with `python scripts/deploy_agent_engine.py`
+(use `--dry-run` to build without deploying), or run `adk api_server simab` as a
+second Cloud Run service. The 20-walker pipeline and SQLite state are unchanged.
 
 ---
 
@@ -297,9 +331,11 @@ what the agent saw and decided.
 
 | Component | Technology |
 |---|---|
+| Agent Builder | Google ADK `LlmAgent` (`simab/agent.py`) — Vertex AI Agent Engine / Cloud Run |
 | Orchestration | Gemini 2.5 Flash (Study Designer, Panel Recruiter, Bias Auditor, Insight Analyst, Report Narrators) |
 | Simulation | Gemini 2.5 Flash-Lite (20 parallel Cognitive Walkers — free tier: 1,500/day) |
-| Observability | Arize Phoenix (OTLP — full prompt + image + response per span) |
+| Observability | Arize Phoenix (OTLP tracing — full prompt + image + response per span) |
+| Partner MCP | `@arizeai/phoenix-mcp` mounted as a live ADK MCP toolset |
 | Backend | FastAPI + aiosqlite + SQLite WAL |
 | Frontend | Next.js 14 App Router + Tailwind CSS |
 | Deployment | Google Cloud Run (backend 2Gi/2CPU, frontend 512Mi) |

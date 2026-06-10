@@ -12,6 +12,7 @@ class Config:
     phoenix_endpoint: str | None
     phoenix_api_key: str | None
     phoenix_project: str
+    phoenix_base_url: str | None
     fidelity_drift_threshold: float
     frontend_url: str
     sim_concurrency: int
@@ -29,6 +30,9 @@ class Config:
             phoenix_endpoint=os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or None,
             phoenix_api_key=os.environ.get("PHOENIX_API_KEY") or None,
             phoenix_project=os.environ.get("PHOENIX_PROJECT", "veratest"),
+            # Base URL of the Phoenix instance the Arize MCP server queries
+            # (Phoenix Cloud: https://app.phoenix.arize.com, or self-hosted).
+            phoenix_base_url=os.environ.get("PHOENIX_BASE_URL") or None,
             fidelity_drift_threshold=float(
                 os.environ.get("VERATEST_DRIFT_THRESHOLD", "0.25")
             ),

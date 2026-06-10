@@ -33,6 +33,9 @@ export default function NewRunPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [mode, setMode] = useState<"describe" | "manual">("describe");
+  const [description, setDescription] = useState("");
+  const [clarification, setClarification] = useState<string | null>(null);
 
   // Detect "last audience" availability after mount (localStorage is client-only)
   useEffect(() => {
@@ -75,6 +78,53 @@ export default function NewRunPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
+
+    if (mode === "describe") {
+      if (!variantA || !description.trim()) {
+        setError("Upload a screenshot and describe your challenge above.");
+        return;
+      }
+      setSubmitting(true);
+      setError(null);
+      setClarification(null);
+      try {
+        const up = new FormData();
+        up.append("variant_a", variantA);
+        if (variantB) up.append("variant_b", variantB);
+        const upRes = await fetch("/api/agent/upload", { method: "POST", body: up });
+        if (!upRes.ok) {
+          throw new Error(`${upRes.status}: ${(await upRes.text()).slice(0, 200)}`);
+        }
+        const paths = await upRes.json();
+        const launchRes = await fetch("/api/agent/launch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            description,
+            variant_a_path: paths.variant_a_path,
+            variant_b_path: paths.variant_b_path,
+          }),
+        });
+        if (!launchRes.ok) {
+          throw new Error(`${launchRes.status}: ${(await launchRes.text()).slice(0, 200)}`);
+        }
+        const data = await launchRes.json();
+        if (data.run_id) {
+          router.push(`/runs/${data.run_id}`);
+          return;
+        }
+        setClarification(
+          data.question ||
+            "Could you add a bit more detail about the goal and audience?"
+        );
+        setSubmitting(false);
+      } catch (err: any) {
+        setError(err.message || "Failed to start run");
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (!variantA || !goal.trim()) {
       setError("Please fill in the highlighted fields above.");
       return;
@@ -103,7 +153,10 @@ export default function NewRunPage() {
     }
   }
 
-  const canSubmit = variantA && goal.trim() && !submitting;
+  const canSubmit =
+    !submitting &&
+    !!variantA &&
+    (mode === "describe" ? description.trim() : goal.trim());
   const selectedCount =
     preset.age_ranges.length +
     preset.roles.length +
@@ -117,9 +170,31 @@ export default function NewRunPage() {
       <div>
         <h1 className="text-2xl font-semibold mb-1">New pretest</h1>
         <p className="text-sm text-neutral-600">
-          Upload two variants, describe the goal, pick the audience.
-          Typical run: <strong>60–120 seconds</strong>.
+          Upload your design, then describe the challenge — or set the audience
+          manually. Typical run: <strong>60–120 seconds</strong>.
         </p>
+      </div>
+
+      {/* Mode toggle */}
+      <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1 text-sm">
+        {(["describe", "manual"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => {
+              setMode(m);
+              setClarification(null);
+            }}
+            className={[
+              "px-4 py-1.5 rounded-md transition",
+              mode === m
+                ? "bg-white shadow-sm font-medium text-neutral-900"
+                : "text-neutral-500 hover:text-neutral-800",
+            ].join(" ")}
+          >
+            {m === "describe" ? "Describe it" : "Build it manually"}
+          </button>
+        ))}
       </div>
 
       {/* Variants */}
@@ -147,7 +222,36 @@ export default function NewRunPage() {
         </p>
       </section>
 
+      {/* Describe mode — natural-language brief, parsed by the Concierge agent */}
+      {mode === "describe" && (
+        <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-3">
+          <h2 className="font-medium">Describe your challenge & audience</h2>
+          {clarification && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+              {clarification}
+            </div>
+          )}
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={5}
+            placeholder="e.g. We're testing our new pricing page. The goal is to get startup founders to start a free trial. They're technical, time-poor, and skeptical of long forms — most arrive from a Product Hunt launch."
+            className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              submitted && !description.trim()
+                ? "border-red-400 ring-red-200 focus:ring-red-400 bg-red-50"
+                : "border-neutral-300 focus:ring-neutral-900"
+            }`}
+          />
+          <p className="text-xs text-neutral-500">
+            Write what you're testing, the goal (what should visitors do?), and
+            who the audience is. We'll read it and start the pretest.
+          </p>
+        </section>
+      )}
+
       {/* Goal */}
+      {mode === "manual" && (
+      <>
       <section className="rounded-lg border border-neutral-200 bg-white p-5 space-y-3">
         <h2 className="font-medium">Conversion goal</h2>
         <input
@@ -242,6 +346,8 @@ export default function NewRunPage() {
           />
         </div>
       </section>
+      </>
+      )}
 
       {error && (
         <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
@@ -255,10 +361,16 @@ export default function NewRunPage() {
           disabled={!canSubmit}
           className="px-5 py-2.5 rounded-md bg-neutral-900 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-neutral-700 transition"
         >
-          {submitting ? "Starting…" : "Run pretest"}
+          {submitting
+            ? mode === "describe"
+              ? "Reading your description…"
+              : "Starting…"
+            : "Run pretest"}
         </button>
         <span className="text-xs text-neutral-500">
-          ~20 agents, parallel · uses Gemini Flash-Lite free tier
+          {mode === "describe"
+            ? "AI reads your description, then runs ~20 audience agents"
+            : "~20 agents, parallel · uses Gemini Flash-Lite free tier"}
         </span>
       </div>
     </form>
