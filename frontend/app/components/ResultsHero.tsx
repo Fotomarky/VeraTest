@@ -97,9 +97,9 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
   return (
     <section>
       <div className="rounded-lg border border-neutral-200 bg-white p-5">
-        <div className="grid grid-cols-[auto_1fr] gap-6 items-center max-sm:grid-cols-1">
+        <div className="grid grid-cols-[auto_1fr] gap-6 items-stretch max-sm:grid-cols-1">
           {/* Variant thumbnails */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 h-full max-sm:justify-center">
             <Thumb runId={runId} which="a" label="A" win={winner === "variant_a"} />
             {!isSingleScreen && (
               <Thumb runId={runId} which="b" label="B" win={winner === "variant_b"} />
@@ -107,20 +107,21 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
           </div>
 
           {/* Persona circles */}
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-neutral-400 mb-3">
+          <div className="flex flex-col justify-center">
+            <div className="text-[11px] uppercase tracking-wide text-neutral-400 mb-3 text-center">
               👥 Your Audience Personas · {totalAgents} agents across {sorted.length} segment{sorted.length !== 1 ? "s" : ""}
             </div>
-            <div className="flex gap-5 flex-wrap">
+            <div className="flex gap-5 flex-wrap justify-center">
               {sorted.map((p) => {
                 const results = resultsBySegment.get(p.segment) ?? [];
                 const count = results.length;
+                const avg = avgOverall(results);
                 let ring: string;
                 let leanLabel: string;
                 if (isSingleScreen) {
-                  const pos = Math.max(0, Math.min(100, Math.round((avgOverall(results) / 10) * 100)));
+                  const pos = Math.max(0, Math.min(100, Math.round((avg / 10) * 100)));
                   ring = `conic-gradient(#22c55e 0 ${pos}%, #ef4444 ${pos}% 100%)`;
-                  leanLabel = pos >= 60 ? "positive" : pos >= 40 ? "mixed" : "negative";
+                  leanLabel = `${avg.toFixed(1)}/10`;
                 } else {
                   const { pctA, pctB } = leanPercents(results);
                   ring = `conic-gradient(#3b82f6 0 ${pctA}%, #8b5cf6 ${pctA}% 100%)`;
@@ -154,8 +155,9 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
                       {isActive ? " ▾" : ""}
                     </div>
 
-                    {/* hover tooltip preview */}
-                    <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 rounded bg-neutral-800 text-white text-[10px] leading-snug px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20 text-left">
+                    {/* hover tooltip preview — sits below the persona so it
+                        never collides with the section header above the row */}
+                    <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-48 whitespace-normal rounded-md bg-neutral-800 text-white text-[10px] leading-snug px-2.5 py-2 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-30 text-left">
                       <span className="font-semibold block">{cleanPersona(p.segment)}</span>
                       <span className="text-neutral-300">
                         {count} agents · {leanLabel}
@@ -168,7 +170,7 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
             </div>
 
             {/* legend */}
-            <div className="flex gap-4 flex-wrap text-[10px] text-neutral-400 mt-3">
+            <div className="flex gap-4 flex-wrap justify-center text-[10px] text-neutral-400 mt-3">
               {isSingleScreen ? (
                 <>
                   <Legend color="#22c55e" label="positive" />
@@ -212,12 +214,12 @@ function Thumb({
   win: boolean;
 }) {
   return (
-    <div className="relative w-[84px] h-[120px] rounded-lg border border-neutral-200 overflow-hidden bg-neutral-100">
+    <div className="relative w-[120px] h-full min-h-[190px] rounded-lg border border-neutral-200 overflow-hidden bg-neutral-100">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={`/api/runs/${runId}/image/${which}`}
         alt={`Variant ${label}`}
-        className="w-full h-full object-cover"
+        className="w-full h-full object-cover object-top"
       />
       <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] font-bold text-center py-0.5">
         {label}

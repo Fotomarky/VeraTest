@@ -312,7 +312,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
         />
       )}
 
-      {synth && run.status === "complete" && (
+      {synth && (
         <EconomicsStrip
           elapsedSec={
             run.created_at && run.updated_at
