@@ -38,6 +38,7 @@ def _agent_span(scenario_id: str, agent_idx: int, cohort: str):
     with _tracer.start_as_current_span(
         name=f"sim_agent.{agent_idx}",
         attributes={
+            "openinference.span.kind": "AGENT",
             "veratest.scenario_id": scenario_id,
             "veratest.agent_idx": agent_idx,
             "veratest.cohort": cohort,
