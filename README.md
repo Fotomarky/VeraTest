@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" />
   <img src="https://img.shields.io/badge/Arize-Phoenix%20Observability-7C3AED?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Gemini-Flash%20%7C%20Flash--Lite-4285F4?style=for-the-badge&logo=google&logoColor=white" />
-  <img src="https://img.shields.io/badge/Tests-45%20passing-22C55E?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Tests-79%20passing-22C55E?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge" />
   <img src="https://img.shields.io/badge/MCP-native-0EA5E9?style=for-the-badge" />
 </p>
@@ -464,11 +464,18 @@ Predictions checkpoint after every case, so an interrupted run resumes instead o
 
 ### What the numbers say
 
-On the 20-case balanced set (2026-06-10 run, free-tier Gemini under heavy 503 capacity pressure):
+On the 20-case balanced set (2026-06-11 run, free-tier Gemini under heavy 503 capacity pressure):
 
-- **When VeraTest committed to a verdict, it was right 7 of 8 (87.5%)** vs one-shot Gemini's 60% — small n, treat as a directional signal, not a benchmark claim.
-- **One confident error in 20 cases.** One-shot Gemini, which always answers, was confidently wrong 8 times. Under degraded conditions VeraTest abstains ("tie") rather than fabricating a verdict — for a decision-support tool, refusing to guess *is* the correct behavior, and the pipeline now enforces it explicitly: if fewer than 70% of the persona panel completes (`SIMAB_SIM_QUORUM`), the run fails loudly instead of synthesizing from thin evidence.
-- 12 of 20 runs degraded to abstention that night due to Gemini free-tier 503s — those score as *wrong* in the headline number, which is why we report decisive accuracy separately and publish the raw per-case table in `validation/report_*.md` rather than a single flattering percentage.
+| Method | Accuracy | Decisive accuracy |
+|---|---|---|
+| `random` | 30.0% (6/20) | 30.0% (6/20) |
+| `always_a` / `always_b` / `heuristic` | 50.0% (10/20) | 50.0% (10/20) |
+| `oneshot_gemini` | 70.0% (14/20) | 70.0% (14/20) |
+| **VeraTest (full pipeline)** | 45.0% (9/20, 10 abstained) | **90.0% (9/10)** |
+
+- **When VeraTest committed to a verdict, it was right 9 of 10 (90%)** vs one-shot Gemini's 70% — small n, treat as a directional signal, not a benchmark claim.
+- **One confident error in 20 cases.** One-shot Gemini, which always answers, was confidently wrong 6 times. Under degraded conditions VeraTest abstains ("tie") rather than fabricating a verdict — for a decision-support tool, refusing to guess *is* the correct behavior, and the pipeline now enforces it explicitly: if fewer than 70% of the persona panel completes (`SIMAB_SIM_QUORUM`), the run fails loudly instead of synthesizing from thin evidence.
+- 10 of 20 runs degraded to abstention that day due to Gemini free-tier 503s — those score as *wrong* in the headline number (45%), which is why we report decisive accuracy separately and publish the raw per-case table in `validation/report_*.md` rather than a single flattering percentage.
 
 Every report includes the full per-case prediction matrix, so you can audit exactly which cases each method got right.
 
