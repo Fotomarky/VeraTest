@@ -35,6 +35,7 @@ def run_session(run_id: str):
         name=f"veratest_run.{run_id}",
         attributes={
             "openinference.session.id": run_id,
+            "openinference.span.kind": "AGENT",
             "veratest.run_id": run_id,
         },
     ):

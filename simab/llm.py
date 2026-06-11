@@ -25,7 +25,7 @@ import random
 from tenacity import (
     RetryCallState,
     retry,
-    retry_if_exception_type,
+    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
@@ -33,6 +33,11 @@ from google import genai
 from google.genai import types
 
 from .config import CONFIG
+
+try:
+    from opentelemetry import trace as _otel_trace
+except ImportError:  # pragma: no cover - otel is a phoenix extra
+    _otel_trace = None
 
 log = logging.getLogger(__name__)
 
@@ -112,11 +117,19 @@ def _get_buckets(model: str) -> tuple[_TokenBucket, _TokenBucket]:
 _client: genai.Client | None = None
 
 
+class ConfigError(RuntimeError):
+    """Non-retryable setup error (e.g. missing API key).
+
+    Retrying a missing key 6 times with exponential waits turns an instant
+    failure into ~2 minutes per call — across a 40-call validation run that
+    burned a full hour before surfacing the real problem (2026-06-10)."""
+
+
 def get_client() -> genai.Client:
     global _client
     if _client is None:
         if not CONFIG.gemini_api_key:
-            raise RuntimeError(
+            raise ConfigError(
                 "GEMINI_API_KEY is not set. Get a free key at "
                 "https://aistudio.google.com/app/apikey"
             )
@@ -165,10 +178,34 @@ def _wait_capacity_aware(retry_state: RetryCallState) -> float:
     return _wait_transient(retry_state)
 
 
+def _record_retry(retry_state: RetryCallState) -> None:
+    """Make retries visible in Phoenix: each failed attempt already produces
+    its own error LLM span (the instrumentor records the raised exception),
+    but nothing marks them as attempts of the same logical call. This hook
+    adds an `llm.retry` event to the enclosing span (sim_agent / phase span)
+    with the attempt number and error class, so the trace shows exactly when
+    a call degraded into backoff and why."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    log.warning(
+        f"Gemini retry — attempt {retry_state.attempt_number} failed: "
+        f"{str(exc)[:200]}"
+    )
+    if _otel_trace is None:
+        return
+    span = _otel_trace.get_current_span()
+    if span.is_recording():
+        span.add_event("llm.retry", attributes={
+            "retry.attempt_number": retry_state.attempt_number,
+            "retry.error": str(exc)[:300],
+            "retry.is_capacity_error": bool(exc and _is_capacity_error(exc)),
+        })
+
+
 @retry(
-    retry=retry_if_exception_type(Exception),
+    retry=retry_if_not_exception_type(ConfigError),
     stop=stop_after_attempt(6),
     wait=_wait_capacity_aware,
+    before_sleep=_record_retry,
     reraise=True,
 )
 async def generate(

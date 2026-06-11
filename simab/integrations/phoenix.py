@@ -12,6 +12,7 @@ Then set PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317 in your env.
 The dashboard is at http://localhost:6006 — show this in the demo.
 """
 from __future__ import annotations
+import contextlib
 import logging
 
 from ..config import CONFIG
@@ -20,6 +21,52 @@ log = logging.getLogger(__name__)
 
 _initialized = False
 _tracer_provider = None
+
+try:
+    from opentelemetry import trace as _otel_trace
+    _pipeline_tracer = _otel_trace.get_tracer("simab.pipeline")
+except ImportError:  # pragma: no cover - otel is a phoenix extra
+    _pipeline_tracer = None
+
+
+@contextlib.contextmanager
+def pipeline_span(name: str, *, kind: str = "CHAIN", run_id: str | None = None):
+    """Start a span for the run root or one pipeline phase.
+
+    Every Gemini/simulator span started inside nests under it, so a whole run
+    renders as one trace tree in Phoenix instead of ~24 orphan traces.
+    `openinference.span.kind` drives the Phoenix UI: "AGENT" for the run root,
+    "CHAIN" for phases. Yields the span, or None when OpenTelemetry isn't
+    installed (the pipeline must run unchanged without the phoenix extra).
+    """
+    if _pipeline_tracer is None:
+        yield None
+        return
+    attributes = {"openinference.span.kind": kind}
+    if run_id:
+        attributes["veratest.run_id"] = run_id
+    with _pipeline_tracer.start_as_current_span(name, attributes=attributes) as span:
+        yield span
+
+
+class _OtelNoiseFilter(logging.Filter):
+    """Drop OTel's "Failed to detach context" tracebacks.
+
+    ADK's native tracing and OpenInference's GoogleGenAIInstrumentor both wrap
+    the same streaming Gemini calls; their context tokens cross async-generator
+    boundaries and OTel logs a harmless-but-loud ValueError traceback for each.
+    We keep BOTH span sources (agent spans and pipeline spans should land in
+    Phoenix) and silence only this specific noise.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Failed to detach context" not in record.getMessage()
+
+
+def _install_otel_noise_filter() -> None:
+    otel_logger = logging.getLogger("opentelemetry.context")
+    if not any(isinstance(f, _OtelNoiseFilter) for f in otel_logger.filters):
+        otel_logger.addFilter(_OtelNoiseFilter())
 
 
 def init_phoenix() -> bool:
@@ -57,6 +104,7 @@ def init_phoenix() -> bool:
             register_kwargs["api_key"] = CONFIG.phoenix_api_key
         tracer_provider = register(**register_kwargs)
         GoogleGenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        _install_otel_noise_filter()
         _tracer_provider = tracer_provider
         _initialized = True
         ui_hint = CONFIG.phoenix_endpoint or "http://localhost:6006"
