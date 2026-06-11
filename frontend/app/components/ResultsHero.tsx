@@ -108,7 +108,7 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
 
           {/* Persona circles */}
           <div className="flex flex-col justify-center">
-            <div className="text-[11px] uppercase tracking-wide text-neutral-400 mb-3 text-center">
+            <div className="text-[13px] uppercase tracking-wide text-neutral-700 font-semibold mb-3 text-center">
               👥 Your Audience Personas · {totalAgents} agents across {sorted.length} segment{sorted.length !== 1 ? "s" : ""}
             </div>
             <div className="flex gap-5 flex-wrap justify-center">
@@ -116,17 +116,16 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
                 const results = resultsBySegment.get(p.segment) ?? [];
                 const count = results.length;
                 const avg = avgOverall(results);
-                let ring: string;
-                let leanLabel: string;
-                if (isSingleScreen) {
-                  const pos = Math.max(0, Math.min(100, Math.round((avg / 10) * 100)));
-                  ring = `conic-gradient(#22c55e 0 ${pos}%, #ef4444 ${pos}% 100%)`;
-                  leanLabel = `${avg.toFixed(1)}/10`;
-                } else {
+                // Ring always encodes sentiment: green = positive resonance, red = negative.
+                const pos = Math.max(0, Math.min(100, Math.round((avg / 10) * 100)));
+                const ring = `conic-gradient(#22c55e 0 ${pos}%, #ef4444 ${pos}% 100%)`;
+                // A/B lean is a secondary signal — kept as a small tag.
+                let leanTag: string | null = null;
+                if (!isSingleScreen) {
                   const { pctA, pctB } = leanPercents(results);
-                  ring = `conic-gradient(#3b82f6 0 ${pctA}%, #8b5cf6 ${pctA}% 100%)`;
-                  leanLabel = Math.abs(pctA - pctB) <= 4 ? "split" : pctA > pctB ? "leans A" : "leans B";
+                  leanTag = Math.abs(pctA - pctB) <= 4 ? "split" : pctA > pctB ? "leans A" : "leans B";
                 }
+                const leanLabel = `${avg.toFixed(1)}/10${leanTag ? ` · ${leanTag}` : ""}`;
                 const isActive = selected === p.segment;
                 const tip = topFrictionPoint(results);
                 return (
@@ -171,17 +170,8 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
 
             {/* legend */}
             <div className="flex gap-4 flex-wrap justify-center text-[10px] text-neutral-400 mt-3">
-              {isSingleScreen ? (
-                <>
-                  <Legend color="#22c55e" label="positive" />
-                  <Legend color="#ef4444" label="negative" />
-                </>
-              ) : (
-                <>
-                  <Legend color="#3b82f6" label="leans A" />
-                  <Legend color="#8b5cf6" label="leans B" />
-                </>
-              )}
+              <Legend color="#22c55e" label="positive" />
+              <Legend color="#ef4444" label="negative" />
             </div>
           </div>
         </div>

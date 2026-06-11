@@ -7,7 +7,6 @@ import BlockersMatrix from "../../components/BlockersMatrix";
 import ResultsHero from "../../components/ResultsHero";
 import UserStoryScaffold from "../../components/UserStoryScaffold";
 import VisualEvidence from "../../components/VisualEvidence";
-import EconomicsStrip from "../../components/EconomicsStrip";
 
 type ScenarioCard = {
   id: string;
@@ -300,6 +299,11 @@ export default function RunPage({ params }: { params: { id: string } }) {
         status={run.status}
         onCopyMarkdown={copyMarkdown}
         copied={copied}
+        elapsedSec={
+          run.created_at && run.updated_at
+            ? (Date.parse(run.updated_at) - Date.parse(run.created_at)) / 1000
+            : null
+        }
       />
 
       {synth && uniquePersonas.length > 0 && (
@@ -309,16 +313,6 @@ export default function RunPage({ params }: { params: { id: string } }) {
           resultsBySegment={resultsBySegment}
           winner={winner}
           isSingleScreen={isSingleScreen}
-        />
-      )}
-
-      {synth && (
-        <EconomicsStrip
-          elapsedSec={
-            run.created_at && run.updated_at
-              ? (Date.parse(run.updated_at) - Date.parse(run.created_at)) / 1000
-              : null
-          }
         />
       )}
 
