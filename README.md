@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="docs/logo.png" alt="VeraTest" width="420" />
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" />
   <img src="https://img.shields.io/badge/Arize-Phoenix%20Observability-7C3AED?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Gemini-Flash%20%7C%20Flash--Lite-4285F4?style=for-the-badge&logo=google&logoColor=white" />
@@ -100,6 +104,23 @@ AI persona simulation is not a replacement for real traffic data. It's a replace
 The question isn't *"is this as reliable as a 50,000-visitor A/B test with 95% statistical significance?"* It's *"is this more reliable than no test at all?"* The methodology says yes. The emerging LLM research says yes. And VeraTest's own validation against known A/B outcomes provides a concrete accuracy number you can evaluate for yourself (see [Validation](#validation)).
 
 A $50,000 A/B test is more rigorous. But you need a live product, real traffic, and 4–6 weeks. VeraTest gives you a directional signal in 90 seconds, before you've written a single line of code for Variant B — so you can build the right variant and save the real test for final confirmation.
+
+### 4. What the numbers say
+
+On the 20-case balanced set (2026-06-11 run, free-tier Gemini under heavy 503 capacity pressure):
+
+| Method | Accuracy | Decisive accuracy |
+|---|---|---|
+| `random` | 30.0% (6/20) | 30.0% (6/20) |
+| `always_a` / `always_b` / `heuristic` | 50.0% (10/20) | 50.0% (10/20) |
+| `oneshot_gemini` | 70.0% (14/20) | 70.0% (14/20) |
+| **VeraTest (full pipeline)** | 45.0% (9/20, 10 abstained) | **90.0% (9/10)** |
+
+- **When VeraTest committed to a verdict, it was right 9 of 10 (90%)** vs one-shot Gemini's 70% — small n, treat as a directional signal, not a benchmark claim.
+- **One confident error in 20 cases.** One-shot Gemini, which always answers, was confidently wrong 6 times. Under degraded conditions VeraTest abstains ("tie") rather than fabricating a verdict — for a decision-support tool, refusing to guess *is* the correct behavior, and the pipeline now enforces it explicitly: if fewer than 70% of the persona panel completes (`SIMAB_SIM_QUORUM`), the run fails loudly instead of synthesizing from thin evidence.
+- 10 of 20 runs degraded to abstention that day due to Gemini free-tier 503s — those score as *wrong* in the headline number (45%), which is why we report decisive accuracy separately and publish the raw per-case table in `validation/report_*.md` rather than a single flattering percentage.
+
+Every report includes the full per-case prediction matrix, so you can audit exactly which cases each method got right. See [Validation](#validation) for the harness details.
 
 ---
 
@@ -478,36 +499,7 @@ python validation/run.py --dataset validation/dataset_balanced.csv --baselines a
 
 Predictions checkpoint after every case, so an interrupted run resumes instead of restarting; abstentions are re-attempted automatically.
 
-### What the numbers say
-
-On the 20-case balanced set (2026-06-11 run, free-tier Gemini under heavy 503 capacity pressure):
-
-| Method | Accuracy | Decisive accuracy |
-|---|---|---|
-| `random` | 30.0% (6/20) | 30.0% (6/20) |
-| `always_a` / `always_b` / `heuristic` | 50.0% (10/20) | 50.0% (10/20) |
-| `oneshot_gemini` | 70.0% (14/20) | 70.0% (14/20) |
-| **VeraTest (full pipeline)** | 45.0% (9/20, 10 abstained) | **90.0% (9/10)** |
-
-- **When VeraTest committed to a verdict, it was right 9 of 10 (90%)** vs one-shot Gemini's 70% — small n, treat as a directional signal, not a benchmark claim.
-- **One confident error in 20 cases.** One-shot Gemini, which always answers, was confidently wrong 6 times. Under degraded conditions VeraTest abstains ("tie") rather than fabricating a verdict — for a decision-support tool, refusing to guess *is* the correct behavior, and the pipeline now enforces it explicitly: if fewer than 70% of the persona panel completes (`SIMAB_SIM_QUORUM`), the run fails loudly instead of synthesizing from thin evidence.
-- 10 of 20 runs degraded to abstention that day due to Gemini free-tier 503s — those score as *wrong* in the headline number (45%), which is why we report decisive accuracy separately and publish the raw per-case table in `validation/report_*.md` rather than a single flattering percentage.
-
-Every report includes the full per-case prediction matrix, so you can audit exactly which cases each method got right.
-
----
-
-## Roadmap
-
-**Next**
-- Figma plugin — pretest frames without leaving the design tool
-- GA4 connector — validate which tested variant lifted post-launch conversion
-- Linear webhook — auto-pretest when a ticket is labeled `veratest:pretest`
-
-**Later**
-- Persona library wizard — no-code persona editor for PMs
-- N-variant mode — rank 3+ designs in one run
-- GCP Marketplace listing (A2A endpoints already exist)
+Headline numbers from the latest run are in [Why this works · §4](#4-what-the-numbers-say); per-case prediction matrices live in `validation/report_*.md`.
 
 ---
 
