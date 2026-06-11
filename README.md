@@ -187,7 +187,23 @@ docker run -p 6006:6006 -p 4317:4317 arizephoenix/phoenix:latest
 export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
 ```
 
-Every run produces ~24 spans in Phoenix — one per Gemini call. Full prompts, image payloads, responses, and timing. You can see exactly what the Study Designer extracted, what each Cognitive Walker decided and why, what the Bias Auditor flagged. No black box.
+Every run produces **one trace tree** in Phoenix — ~125 spans nested under a single root `veratest_run.run_<id>` agent span, with one child `phase.*` span per pipeline phase and one LLM span per Gemini call beneath it. Full prompts, image payloads, responses, retries, and timing. You can see exactly what the Study Designer extracted, what each Cognitive Walker decided and why, what the Bias Auditor flagged, and which retry recovered a 503. No black box.
+
+```
+veratest_run.run_<id>                  [AGENT]   ~165s
+├─ phase.study_designer                [CHAIN]
+├─ phase.panel_recruiter               [CHAIN]   (retries surface as sibling ERROR spans + llm.retry events)
+├─ phase.cognitive_walkers             [CHAIN]   → 20 × sim_agent.N → GenerateContent
+├─ phase.audit_and_synthesis           [CHAIN]
+├─ phase.report_narrators              [CHAIN]
+└─ phase.fidelity_auditor              [CHAIN]   → 20 × persona_consistency.evaluate [EVALUATOR]
+```
+
+> **Cloud Run note.** The pipeline runs as a background task after the HTTP response returns. Cloud Run's default per-request CPU throttling can starve the OTLP export thread between requests and silently drop early spans. If you deploy there, enable always-allocated CPU:
+> ```bash
+> gcloud run services update veratest-backend --no-cpu-throttling
+> ```
+> This trades per-request billing for per-instance-time while warm; the background pipeline is materially safer with it on.
 
 ### Cross-run calibration — agents that improve
 
