@@ -219,7 +219,7 @@ export GEMINI_API_KEY="your-key-here"
 
 # Smoke tests (no API calls needed)
 pytest tests/ -v
-# Expected: 45 passed
+# Expected: 79 passed
 
 uvicorn simab.main:app --reload --port 8000
 
@@ -340,7 +340,7 @@ second Cloud Run service. The 20-walker pipeline and SQLite state are unchanged.
 | Frontend | Next.js 14 App Router + Tailwind CSS |
 | Deployment | Google Cloud Run (backend 2Gi/2CPU, frontend 512Mi) |
 | MCP server | Python stdio, 4 tools |
-| Tests | pytest + pytest-asyncio, 45 tests, ~1s |
+| Tests | pytest + pytest-asyncio, 79 tests, ~2s |
 
 ---
 
@@ -432,7 +432,7 @@ Ask Claude: *"Run a pretest on these two screenshots for trial signups from star
 
 ```bash
 pytest tests/ -v
-# 60 passed in ~2s
+# 79 passed in ~2s
 ```
 
 Covers: idempotent state writes under concurrent agents, schema compatibility, traffic-weighted allocator, resonance aggregation, trust gap ranking, markdown export, share-page self-containment, and the describe-mode HTTP surface (upload sanitization, orphan cleanup, agent-unavailable degradation).
