@@ -15,7 +15,7 @@ from .agents import (
 )
 from .config import CONFIG
 from .integrations.phoenix import pipeline_span
-from .integrations.session import run_session
+from .integrations.session import mark_session_success, run_session
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ async def run_pipeline(run_id: str) -> None:
     asynchronously and the fidelity slice is written when ready."""
     log.info(f"[{run_id}] pipeline start")
     try:
-        with run_session(run_id):
+        with run_session(run_id, input_text=await _session_input(run_id)) as session_span:
             with pipeline_span("phase.study_designer"):
                 await normalizer.run(run_id)
             with pipeline_span("phase.panel_recruiter"):
@@ -106,6 +106,7 @@ async def run_pipeline(run_id: str) -> None:
                 await narrative.run(run_id)
             await state.set_status(run_id, "complete")
             log.info(f"[{run_id}] pipeline complete")
+            mark_session_success(session_span, await _session_output(run_id))
             await _notify_completion(run_id)
             # Created inside the session span so the background fidelity
             # phase joins the same trace tree (children may outlive the root).
@@ -116,6 +117,39 @@ async def run_pipeline(run_id: str) -> None:
         raise
     finally:
         ratelimit.notify_run_finished()
+
+
+async def _session_input(run_id: str) -> str | None:
+    """Goal + audience for the run root span's `input.value` — what the
+    Phoenix trace table shows in its "input" column."""
+    run = await state.get_run(run_id)
+    if run is None:
+        return None
+    parts = [f"Goal: {run.goal}"]
+    if run.audience_raw:
+        parts.append(f"Audience: {run.audience_raw}")
+    parts.append("Mode: A/B comparison" if run.variant_b_path else "Mode: single-screen")
+    return "\n".join(parts)
+
+
+async def _session_output(run_id: str) -> str | None:
+    """Verdict summary for the run root span's `output.value`."""
+    run = await state.get_run(run_id)
+    syn = run.synthesis if run else None
+    if syn is None:
+        return None
+    parts = [f"Directional winner: {syn.directional_winner}"]
+    if syn.cohort_resonance_overall:
+        scores = ", ".join(
+            f"{cohort}={score:.1f}/10"
+            for cohort, score in sorted(syn.cohort_resonance_overall.items())
+            if score
+        )
+        if scores:
+            parts.append(f"Resonance: {scores}")
+    if syn.recommendation:
+        parts.append(syn.recommendation)
+    return "\n".join(parts)
 
 
 async def _run_fidelity_async(run_id: str) -> None:

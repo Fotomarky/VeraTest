@@ -10,6 +10,7 @@ import logging
 from types import SimpleNamespace
 
 from simab.integrations.phoenix import _install_otel_noise_filter, pipeline_span
+from simab.integrations.session import mark_session_success, run_session
 from simab.llm import _record_retry
 
 
@@ -55,6 +56,43 @@ def test_pipeline_span_propagates_exceptions():
         assert "quorum" in str(e)
     else:
         raise AssertionError("exception was swallowed by pipeline_span")
+
+
+def test_run_session_yields_span_and_accepts_input_text():
+    # With the no-op tracer this yields a NonRecordingSpan; with otel
+    # missing it yields None. Either way the contract is "yields something
+    # mark_session_success can take" and input_text must not raise.
+    with run_session("r1", input_text="Goal: convert\nAudience: founders") as span:
+        mark_session_success(span, "Directional winner: variant_a")
+
+
+def test_mark_session_success_is_safe_without_span():
+    mark_session_success(None, "anything")
+    mark_session_success(None)
+
+
+def test_session_output_summarises_synthesis():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from simab.models import Run, Synthesis
+    from simab.pipeline import _session_input, _session_output
+
+    run = Run(
+        run_id="r1", goal="sign up", audience_raw="founders",
+        variant_a_path="a.png", variant_b_path=None,
+        synthesis=Synthesis(
+            directional_winner="tie",
+            cohort_resonance_overall={"variant_a": 6.06, "variant_b": 0.0},
+            recommendation="Trim the form.",
+        ),
+    )
+    with patch("simab.pipeline.state.get_run", new=AsyncMock(return_value=run)):
+        inp = asyncio.run(_session_input("r1"))
+        out = asyncio.run(_session_output("r1"))
+    assert "Goal: sign up" in inp and "single-screen" in inp
+    assert "tie" in out and "variant_a=6.1/10" in out and "Trim the form." in out
+    assert "variant_b" not in out  # zero scores are noise, not signal
 
 
 def _retry_state(exc: Exception, attempt: int = 2):
