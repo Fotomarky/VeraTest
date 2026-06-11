@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/MCP-native-0EA5E9?style=for-the-badge" />
 </p>
 
-<h1 align="center">VeraTest — Know Your Design Works Before You Ship It</h1>
+<h1 align="center">VeraTest — Know if Your Design Works Before You Ship It</h1>
 
 <p align="center">
   <strong>20 AI agents simulate your target audience evaluating your landing page — before you spend a cent on traffic.</strong>
