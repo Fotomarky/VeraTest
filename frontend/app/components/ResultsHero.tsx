@@ -134,24 +134,35 @@ export default function ResultsHero({ runId, personas, resultsBySegment, winner,
                     onClick={() => setSelected(isActive ? null : p.segment)}
                     aria-expanded={isActive}
                     aria-label={`${cleanPersona(p.segment)}, ${count} agent${count !== 1 ? "s" : ""}, ${leanLabel}${tip ? `, top friction: ${tip}` : ""}`}
-                    className="group relative flex flex-col items-center gap-1 w-24 text-center"
+                    className={`group relative flex flex-col items-center gap-1.5 w-28 px-2 py-3 rounded-lg border text-center transition-all ${
+                      isActive
+                        ? "bg-blue-50 border-blue-300 shadow-sm"
+                        : "bg-white border-neutral-200 hover:border-neutral-300 hover:shadow-md"
+                    }`}
                   >
                     <div
-                      className={`w-16 h-16 rounded-full p-1 transition-transform group-hover:scale-105 ${
-                        isActive ? "ring-2 ring-blue-500" : ""
-                      }`}
+                      className="w-20 h-20 rounded-full p-1.5 transition-transform group-hover:scale-105"
                       style={{ background: ring }}
                     >
-                      <div className="w-full h-full rounded-full bg-white flex items-center justify-center text-xl">
+                      <div className="w-full h-full rounded-full bg-white flex items-center justify-center text-2xl">
                         {STYLE_ICON[p.decision_style] ?? DEVICE_ICON[p.device] ?? "🧑"}
                       </div>
                     </div>
                     <div className="text-[11px] font-semibold leading-tight line-clamp-2">
                       {cleanPersona(p.segment)}
                     </div>
-                    <div className="text-[10px] text-neutral-400">
-                      {count} agent{count !== 1 ? "s" : ""} · {leanLabel}
-                      {isActive ? " ▾" : ""}
+                    <div className="text-[10px] text-neutral-400 flex items-center gap-1">
+                      <span>
+                        {count} agent{count !== 1 ? "s" : ""} · {leanLabel}
+                      </span>
+                      <span
+                        className={`transition-colors ${
+                          isActive ? "text-blue-600" : "text-neutral-400 group-hover:text-neutral-600"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        {isActive ? "▴" : "▾"}
+                      </span>
                     </div>
 
                     {/* hover tooltip preview — sits below the persona so it
