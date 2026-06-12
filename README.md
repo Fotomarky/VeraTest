@@ -11,6 +11,10 @@
   <img src="https://img.shields.io/badge/MCP-native-0EA5E9?style=for-the-badge" />
 </p>
 
+<p align="center">
+  <code>ai-agents</code> · <code>ux-testing</code> · <code>gemini</code> · <code>mcp</code> · <code>google-cloud</code> · <code>ab-testing</code> · <code>landing-page</code>
+</p>
+
 <h1 align="center">VeraTest — Know if Your Design Works Before You Ship It</h1>
 
 <p align="center">
@@ -24,6 +28,12 @@
 <p align="center">
   Built for the <a href="https://googlecloudagenthackathon.devpost.com/">Google Cloud Rapid Agent Hackathon</a> · Arize Track
 </p>
+
+<p align="center">
+  <img src="docs/assets/agent-theatre.gif" alt="20 agents walking through your design in parallel" width="640" />
+</p>
+
+<p align="center"><sub>20 cognitive walkers evaluating your design in parallel — live in the PM Command Center.</sub></p>
 
 ---
 
@@ -242,9 +252,12 @@ visible before/after fidelity delta.
 
 ---
 
-## Quick start — 5 minutes
+## Quick start — 2 minutes
 
 ```bash
+# Install uv (skip if you already have it): https://docs.astral.sh/uv/
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 git clone https://github.com/Fotomarky/VeraTest.git && cd VeraTest
 
 # Backend
