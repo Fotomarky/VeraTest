@@ -215,12 +215,12 @@ function Thumb({
   win: boolean;
 }) {
   return (
-    <div className="relative w-[120px] h-full min-h-[190px] rounded-lg border border-neutral-200 overflow-hidden bg-neutral-100">
+    <div className="relative w-[140px] sm:w-[220px] lg:w-[280px] h-full min-h-[190px] rounded-lg border border-neutral-200 overflow-hidden bg-neutral-100">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={`/api/runs/${runId}/image/${which}`}
         alt={`Variant ${label}`}
-        className="w-full h-full object-cover object-top"
+        className="w-full h-full object-contain object-top bg-neutral-50"
       />
       <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] font-bold text-center py-0.5">
         {label}

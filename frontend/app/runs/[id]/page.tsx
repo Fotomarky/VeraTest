@@ -284,7 +284,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5 max-w-5xl">
       {/* Title */}
       <div className="min-w-0">
         <h1 className="text-xl font-semibold truncate">{run.goal}</h1>
