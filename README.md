@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  Built for the <a [href="https://googlecloudagenthackathon.devpost.com/](https://rapid-agent.devpost.com/)">Google Cloud Rapid Agent Hackathon</a> · Arize Track
+  Built for the <a href="https://googlecloudagenthackathon.devpost.com/(https://rapid-agent.devpost.com/)">Google Cloud Rapid Agent Hackathon</a> · Arize Track
 </p>
 
 ---
